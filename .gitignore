@@ -1,0 +1,10 @@
+node_modules/
+dist/
+android/build/
+android/app/src/main/assets/www/
+android/*.keystore
+*.apk
+*.idsig
+*.tsbuildinfo
+personal-*.json
+.DS_Store

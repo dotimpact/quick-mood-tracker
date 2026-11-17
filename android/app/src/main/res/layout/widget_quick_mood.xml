@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#E609090B"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingLeft="12dp"
+    android:paddingRight="12dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
+
+    <ImageButton
+        android:id="@+id/btn_mood_5"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="Mood 5"
+        android:scaleType="centerInside"
+        android:src="@android:drawable/presence_online"
+        android:tint="#F59E0B" />
+
+    <ImageButton
+        android:id="@+id/btn_mood_4"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="Mood 4"
+        android:scaleType="centerInside"
+        android:src="@android:drawable/presence_online"
+        android:tint="#10B981" />
+
+    <ImageButton
+        android:id="@+id/btn_mood_3"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="Mood 3"
+        android:scaleType="centerInside"
+        android:src="@android:drawable/presence_online"
+        android:tint="#38BDF8" />
+
+    <ImageButton
+        android:id="@+id/btn_mood_2"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="Mood 2"
+        android:scaleType="centerInside"
+        android:src="@android:drawable/presence_online"
+        android:tint="#818CF8" />
+
+    <ImageButton
+        android:id="@+id/btn_mood_1"
+        android:layout_width="0dp"
+        android:layout_height="40dp"
+        android:layout_weight="1"
+        android:background="@android:color/transparent"
+        android:contentDescription="Mood 1"
+        android:scaleType="centerInside"
+        android:src="@android:drawable/presence_online"
+        android:tint="#F43F5E" />
+
+</LinearLayout>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_photo_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#18181B"
+    android:clipToOutline="true">
+
+    <ImageView
+        android:id="@+id/widget_photo_img"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="Latest mood photo"
+        android:scaleType="centerCrop" />
+
+    <LinearLayout
+        android:id="@+id/widget_mood_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="10dp"
+        android:background="#E668B088"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingBottom="6dp"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        android:paddingTop="6dp">
+
+        <ImageView
+            android:id="@+id/widget_badge_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="6dp"
+            android:layout_marginRight="6dp"
+            android:contentDescription="Mood icon"
+            android:scaleType="fitCenter"
+            android:src="@android:drawable/presence_online" />
+
+        <TextView
+            android:id="@+id/widget_badge_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="5dp"
+            android:layout_marginRight="5dp"
+            android:maxLines="1"
+            android:text="11月16日"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_badge_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="22:27"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/widget_btn_add_entry"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="10dp"
+        android:background="@android:color/transparent"
+        android:contentDescription="Add mood entry"
+        android:scaleType="centerInside"
+        android:src="@android:drawable/ic_input_add" />
+
+</FrameLayout>

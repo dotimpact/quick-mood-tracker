@@ -1,0 +1,18 @@
+{
+  "appId": "com.minimal.moodtracker",
+  "appName": "Mood",
+  "webDir": "dist",
+  "backgroundColor": "#09090B",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#09090B"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "backgroundColor": "#09090B",
+      "launchShowDuration": 0
+    }
+  }
+}
