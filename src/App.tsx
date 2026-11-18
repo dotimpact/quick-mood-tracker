@@ -1,44 +1,68 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { MoodLevel, MoodLog, AppSettings } from './types';
+import {
+  AppSettings,
+  AppTab,
+  MoodLevel,
+  MoodLog,
+  RoutineDayLog,
+  RoutineItem,
+} from './types';
 import { MOOD_PRESETS } from './constants/presets';
 import {
-  getAllLogs,
-  saveLog,
   deleteLog,
-  seedInitialLogsIfEmpty,
-  loadSettings,
-  saveSettings,
+  deleteRoutine,
+  getAllLogs,
+  getAllRoutineLogs,
+  getAllRoutines,
+  getCalendarDayKey,
   importMoodistoryCsvOrJson,
+  loadSettings,
+  saveAllRoutines,
+  saveLog,
+  saveRoutine,
+  saveRoutineDayLog,
+  saveSettings,
+  seedInitialLogsIfEmpty,
+  seedInitialRoutinesIfEmpty,
 } from './services/storage';
 import { startNotificationScheduler } from './services/notification';
 import { MinimalIcon } from './components/MinimalIcon';
 import { QuickEntrySheet } from './components/QuickEntrySheet';
 import { LogTimeline } from './components/LogTimeline';
-import { WidgetBarSimulator } from './components/WidgetBarSimulator';
+import { RoutineView } from './components/RoutineView';
+import { PixelsView } from './components/PixelsView';
 import { SettingsModal } from './components/SettingsModal';
 
 export const App: React.FC = () => {
   const [logs, setLogs] = useState<MoodLog[]>([]);
-  const [settings, setSettings] = useState<AppSettings>(() => {
-    const loaded = loadSettings();
-    // Ensure clean default without top widget simulator clutter unless explicitly toggled in session
-    return loaded;
-  });
+  const [routines, setRoutines] = useState<RoutineItem[]>([]);
+  const [routineLogs, setRoutineLogs] = useState<RoutineDayLog[]>([]);
+  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [selectedMoodFilter, setSelectedMoodFilter] = useState<MoodLevel | null>(null);
-  const [viewMode, setViewMode] = useState<'timeline' | 'pixels'>('timeline');
+  const [activeTab, setActiveTab] = useState<AppTab>('timeline');
+  const [selectedRoutineDateKey, setSelectedRoutineDateKey] = useState<string>(() =>
+    getCalendarDayKey(new Date())
+  );
 
   // Quick Entry Sheet states
   const [isSheetOpen, setIsSheetOpen] = useState<boolean>(false);
   const [sheetInitialMood, setSheetInitialMood] = useState<MoodLevel>(4);
+  const [sheetInitialImage, setSheetInitialImage] = useState<string | undefined>(undefined);
   const [editingLog, setEditingLog] = useState<MoodLog | null>(null);
 
   // Settings Modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
-  // Load initial logs & check deep-link query params from Android Widget
+  // Load initial logs, routines, routineLogs & check deep-link query params from Android Widget
   useEffect(() => {
-    seedInitialLogsIfEmpty().then((loaded) => {
-      setLogs(loaded);
+    Promise.all([
+      seedInitialLogsIfEmpty(),
+      seedInitialRoutinesIfEmpty(),
+      getAllRoutineLogs(),
+    ]).then(([loadedLogs, loadedRoutines, loadedRoutineLogs]) => {
+      setLogs(loadedLogs);
+      setRoutines(loadedRoutines);
+      setRoutineLogs(loadedRoutineLogs);
     });
 
     const params = new URLSearchParams(window.location.search);
@@ -65,11 +89,21 @@ export const App: React.FC = () => {
         setIsSheetOpen(true);
       }
     };
+    const handleCameraPhotoEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ imageDataUrl?: string; openSheet?: boolean }>;
+      const dataUrl = custom.detail?.imageDataUrl;
+      if (dataUrl) {
+        setSheetInitialImage(dataUrl);
+        setIsSheetOpen(true);
+      }
+    };
     window.addEventListener('widget-quick-entry', handleNativeWidgetEvent);
     window.addEventListener('moodtracker:quick-entry', handleNativeWidgetEvent);
+    window.addEventListener('moodtracker:camera-photo', handleCameraPhotoEvent);
     return () => {
       window.removeEventListener('widget-quick-entry', handleNativeWidgetEvent);
       window.removeEventListener('moodtracker:quick-entry', handleNativeWidgetEvent);
+      window.removeEventListener('moodtracker:camera-photo', handleCameraPhotoEvent);
     };
   }, []);
 
@@ -86,6 +120,7 @@ export const App: React.FC = () => {
 
   const handleOpenQuickEntry = useCallback((mood: MoodLevel = 4) => {
     setEditingLog(null);
+    setSheetInitialImage(undefined);
     setSheetInitialMood(mood);
     setIsSheetOpen(true);
   }, []);
@@ -109,10 +144,12 @@ export const App: React.FC = () => {
     setLogs(refreshed);
     setIsSheetOpen(false);
     setEditingLog(null);
+    setSheetInitialImage(undefined);
   };
 
   const handleEditLog = (log: MoodLog) => {
     setEditingLog(log);
+    setSheetInitialImage(undefined);
     setSheetInitialMood(log.mood);
     setIsSheetOpen(true);
   };
@@ -123,6 +160,83 @@ export const App: React.FC = () => {
     setLogs(refreshed);
     setIsSheetOpen(false);
     setEditingLog(null);
+    setSheetInitialImage(undefined);
+  };
+
+  const handleToggleRoutine = async (dateKey: string, routineId: string) => {
+    const id = `${dateKey}_${routineId}`;
+    const existing = routineLogs.find((r) => r.id === id);
+    const nextCompleted = !existing?.completed;
+    const entry: RoutineDayLog = {
+      id,
+      dateKey,
+      routineId,
+      completed: nextCompleted,
+      count: nextCompleted ? 1 : 0,
+      comment: existing?.comment,
+      updatedAt: Date.now(),
+    };
+    await saveRoutineDayLog(entry);
+    const refreshed = await getAllRoutineLogs();
+    setRoutineLogs(refreshed);
+  };
+
+  const handleUpdateRoutineComment = async (
+    dateKey: string,
+    routineId: string,
+    comment: string
+  ) => {
+    const id = `${dateKey}_${routineId}`;
+    const existing = routineLogs.find((r) => r.id === id);
+    const entry: RoutineDayLog = {
+      id,
+      dateKey,
+      routineId,
+      completed: existing ? existing.completed : false,
+      count: existing?.count ?? (existing?.completed ? 1 : 0),
+      comment,
+      updatedAt: Date.now(),
+    };
+    await saveRoutineDayLog(entry);
+    const refreshed = await getAllRoutineLogs();
+    setRoutineLogs(refreshed);
+  };
+
+  const handleAddRoutine = async (title: string, icon: string) => {
+    const maxOrder = routines.reduce((max, r) => Math.max(max, r.order), -1);
+    const item: RoutineItem = {
+      id: `routine-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title,
+      icon,
+      order: maxOrder + 1,
+      targetCount: 1,
+    };
+    await saveRoutine(item);
+    const refreshed = await getAllRoutines();
+    setRoutines(refreshed);
+  };
+
+  const handleUpdateRoutine = async (item: RoutineItem) => {
+    await saveRoutine(item);
+    const refreshed = await getAllRoutines();
+    setRoutines(refreshed);
+  };
+
+  const handleReorderRoutines = async (items: RoutineItem[]) => {
+    await saveAllRoutines(items);
+    const refreshed = await getAllRoutines();
+    setRoutines(refreshed);
+  };
+
+  const handleDeleteRoutine = async (id: string) => {
+    await deleteRoutine(id);
+    const refreshed = await getAllRoutines();
+    setRoutines(refreshed);
+  };
+
+  const handleOpenRoutineDate = (dateKey: string) => {
+    setSelectedRoutineDateKey(dateKey);
+    setActiveTab('routines');
   };
 
   const handleUpdateSettings = (next: AppSettings) => {
@@ -131,7 +245,8 @@ export const App: React.FC = () => {
   };
 
   const handleExportJson = () => {
-    const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
+    const payload = { logs, routines, routineLogs };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -143,128 +258,184 @@ export const App: React.FC = () => {
   const handleImportFile = async (file: File): Promise<number> => {
     const text = await file.text();
     const count = await importMoodistoryCsvOrJson(text);
-    const refreshed = await getAllLogs();
-    setLogs(refreshed);
+    const [refreshedLogs, refreshedRoutines, refreshedRoutineLogs] = await Promise.all([
+      getAllLogs(),
+      getAllRoutines(),
+      getAllRoutineLogs(),
+    ]);
+    setLogs(refreshedLogs);
+    setRoutines(refreshedRoutines);
+    setRoutineLogs(refreshedRoutineLogs);
     return count;
   };
 
   const latestMood: MoodLevel = logs[0]?.mood || 4;
-  const activeColor = MOOD_PRESETS[latestMood].color;
+  const activeMoodPreset = MOOD_PRESETS[latestMood];
+  const activeColor = activeMoodPreset.color;
 
   return (
-    <div className="min-h-screen bg-[#111214] text-zinc-200 flex flex-col items-center relative pb-28">
+    <div className="min-h-screen bg-[#111214] text-zinc-200 flex flex-col items-center relative pb-[calc(env(safe-area-inset-bottom,0px)+5.5rem)]">
       {/* Main Mobile Container */}
-      <div className="w-full max-w-md px-5 pt-5 flex flex-col gap-5 relative z-10">
-        {/* Quiet, Uncluttered Top Bar: View Toggle (Timeline / Pixels) + Settings */}
-        <header className="flex items-center justify-between">
-          {/* Segmented View Switcher (Timeline vs Pixels Calendar) */}
-          <div className="flex items-center bg-zinc-900/70 p-0.5 rounded-lg">
-            <button
-              onClick={() => setViewMode('timeline')}
-              className={`px-2.5 py-1.5 rounded-md flex items-center justify-center transition-colors ${
-                viewMode === 'timeline'
-                  ? 'bg-zinc-800/90 text-zinc-200'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-              aria-label="Timeline View"
-              title="タイムライン"
-            >
-              <MinimalIcon name="List" size={16} />
-            </button>
-            <button
-              onClick={() => setViewMode('pixels')}
-              className={`px-2.5 py-1.5 rounded-md flex items-center justify-center transition-colors ${
-                viewMode === 'pixels'
-                  ? 'bg-zinc-800/90 text-zinc-200'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-              aria-label="Pixels Calendar View"
-              title="ピクセル・ヒストリー"
-            >
-              <MinimalIcon name="LayoutGrid" size={16} />
-            </button>
-            <button
-              onClick={() =>
-                handleUpdateSettings({
-                  ...settings,
-                  showWidgetPreview: !settings.showWidgetPreview,
-                })
-              }
-              className={`px-2.5 py-1.5 rounded-md flex items-center justify-center transition-colors ${
-                settings.showWidgetPreview
-                  ? 'bg-zinc-800/90 text-zinc-200'
-                  : 'text-zinc-500 hover:text-zinc-300'
-              }`}
-              aria-label="Toggle Photo Widget Preview"
-              title="フォトウィジェット表示切替"
-            >
-              <MinimalIcon name="Smartphone" size={16} />
-            </button>
-          </div>
-
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/60 transition-colors"
-            aria-label="Settings"
-          >
-            <MinimalIcon
-              name={settings.notificationsEnabled ? 'Bell' : 'SlidersHorizontal'}
-              size={16}
-              color={settings.notificationsEnabled ? activeColor : undefined}
-            />
-          </button>
-        </header>
-
-        {/* Moodistory-style Photo + Quick Add Widget Preview */}
-        {settings.showWidgetPreview && (
-          <WidgetBarSimulator
+      <div className="w-full max-w-md px-5 pt-[calc(env(safe-area-inset-top,0px)+0.5rem)] flex flex-col gap-4 relative z-10">
+        {activeTab === 'timeline' && (
+          <LogTimeline
             logs={logs}
-            onQuickMoodTap={(mood) => handleOpenQuickEntry(mood)}
+            selectedMoodFilter={selectedMoodFilter}
+            onSelectMoodFilter={setSelectedMoodFilter}
             onEditLog={handleEditLog}
-            lastMood={latestMood}
+            onDeleteLog={handleDeleteLog}
+            routines={routines}
+            routineLogs={routineLogs}
+            onSelectRoutineDate={handleOpenRoutineDate}
           />
         )}
 
-        {/* Moodistory-inspired Timeline & Pixels History */}
-        <LogTimeline
-          logs={logs}
-          selectedMoodFilter={selectedMoodFilter}
-          onSelectMoodFilter={setSelectedMoodFilter}
-          onEditLog={handleEditLog}
-          onDeleteLog={handleDeleteLog}
-          viewMode={viewMode}
-        />
+        {activeTab === 'routines' && (
+          <RoutineView
+            routines={routines}
+            routineLogs={routineLogs}
+            selectedDateKey={selectedRoutineDateKey}
+            onChangeDateKey={setSelectedRoutineDateKey}
+            onToggleRoutine={handleToggleRoutine}
+            onUpdateRoutineComment={handleUpdateRoutineComment}
+            onAddRoutine={handleAddRoutine}
+            onUpdateRoutine={handleUpdateRoutine}
+            onReorderRoutines={handleReorderRoutines}
+            onDeleteRoutine={handleDeleteRoutine}
+            accentColor="#68B088"
+          />
+        )}
+
+        {activeTab === 'pixels' && (
+          <PixelsView
+            logs={logs}
+            routines={routines}
+            routineLogs={routineLogs}
+            selectedMoodFilter={selectedMoodFilter}
+            onSelectMoodFilter={setSelectedMoodFilter}
+            onEditLog={handleEditLog}
+            onOpenRoutineDate={handleOpenRoutineDate}
+          />
+        )}
       </div>
 
-      {/* Calm Floating [+] Button */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30">
-        <button
-          onClick={() => handleOpenQuickEntry(latestMood)}
-          className="w-12 h-12 rounded-2xl flex items-center justify-center transition-transform duration-200 active:scale-95 hover:scale-105 shadow-lg shadow-black/40"
-          style={{
-            backgroundColor: activeColor,
-            color: '#111214',
-          }}
-          aria-label="New Log"
-        >
-          <MinimalIcon name="Plus" size={22} strokeWidth={2.25} color="#111214" />
-        </button>
-      </div>
+      {/* Outline-Icon-Only Minimal Bottom Bar */}
+      <nav
+        aria-label="Primary Navigation"
+        className="fixed bottom-0 inset-x-0 z-30 bg-[#131417]/95 backdrop-blur-md border-t border-zinc-800/80 pb-[env(safe-area-inset-bottom,0px)]"
+      >
+        <div className="w-full max-w-md mx-auto h-[60px] px-4 flex items-center justify-around">
+          {/* 1. Timeline */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('timeline')}
+            aria-label="Timeline"
+            aria-current={activeTab === 'timeline' ? 'page' : undefined}
+            className={`relative w-12 h-11 rounded-xl flex flex-col items-center justify-center transition-colors active:scale-95 ${
+              activeTab === 'timeline'
+                ? 'text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <MinimalIcon name="List" size={20} strokeWidth={1.9} />
+            {activeTab === 'timeline' && (
+              <span
+                className="w-1 h-1 rounded-full absolute bottom-1"
+                style={{ backgroundColor: activeColor }}
+              />
+            )}
+          </button>
+
+          {/* 2. Routines */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('routines')}
+            aria-label="Routines"
+            aria-current={activeTab === 'routines' ? 'page' : undefined}
+            className={`relative w-12 h-11 rounded-xl flex flex-col items-center justify-center transition-colors active:scale-95 ${
+              activeTab === 'routines'
+                ? 'text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <MinimalIcon name="ListChecks" size={20} strokeWidth={1.9} />
+            {activeTab === 'routines' && (
+              <span
+                className="w-1 h-1 rounded-full absolute bottom-1"
+                style={{ backgroundColor: '#68B088' }}
+              />
+            )}
+          </button>
+
+          {/* 3. New Mood Entry */}
+          <button
+            type="button"
+            onClick={() => handleOpenQuickEntry(latestMood)}
+            aria-label="New Mood Entry"
+            className="w-12 h-11 rounded-2xl border flex items-center justify-center transition-transform active:scale-95"
+            style={{
+              borderColor: activeMoodPreset.borderColor,
+              backgroundColor: activeMoodPreset.bgSoft,
+              color: activeColor,
+            }}
+          >
+            <MinimalIcon name="Plus" size={20} strokeWidth={2.1} color={activeColor} />
+          </button>
+
+          {/* 4. Pixels */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('pixels')}
+            aria-label="Pixels"
+            aria-current={activeTab === 'pixels' ? 'page' : undefined}
+            className={`relative w-12 h-11 rounded-xl flex flex-col items-center justify-center transition-colors active:scale-95 ${
+              activeTab === 'pixels'
+                ? 'text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <MinimalIcon name="LayoutGrid" size={20} strokeWidth={1.9} />
+            {activeTab === 'pixels' && (
+              <span
+                className="w-1 h-1 rounded-full absolute bottom-1"
+                style={{ backgroundColor: activeColor }}
+              />
+            )}
+          </button>
+
+          {/* 5. Settings */}
+          <button
+            type="button"
+            onClick={() => setIsSettingsOpen(true)}
+            aria-label="Settings"
+            className="w-12 h-11 rounded-xl flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors active:scale-95"
+          >
+            <MinimalIcon
+              name={settings.notificationsEnabled ? 'Bell' : 'SlidersHorizontal'}
+              size={20}
+              strokeWidth={1.9}
+              color={settings.notificationsEnabled ? activeColor : undefined}
+            />
+          </button>
+        </div>
+      </nav>
 
       {/* 1-Sheet Quick Entry Modal */}
       <QuickEntrySheet
         isOpen={isSheetOpen}
         initialMood={sheetInitialMood}
+        initialImageDataUrl={sheetInitialImage}
         editingLog={editingLog}
         onClose={() => {
           setIsSheetOpen(false);
           setEditingLog(null);
+          setSheetInitialImage(undefined);
         }}
         onSave={handleSaveEntry}
         onDelete={handleDeleteLog}
       />
 
-      {/* Notification & Widget Settings Sheet */}
+      {/* Notification & Data Settings Sheet */}
       <SettingsModal
         isOpen={isSettingsOpen}
         settings={settings}

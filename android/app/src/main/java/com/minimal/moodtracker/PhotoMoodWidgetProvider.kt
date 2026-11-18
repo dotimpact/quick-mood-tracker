@@ -48,6 +48,7 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
 
     companion object {
         const val EXTRA_OPEN_SHEET = "com.minimal.moodtracker.EXTRA_OPEN_SHEET"
+        const val EXTRA_LAUNCH_CAMERA = "com.minimal.moodtracker.EXTRA_LAUNCH_CAMERA"
         const val ACTION_REFRESH_WIDGET = "com.minimal.moodtracker.ACTION_REFRESH_PHOTO_WIDGET"
 
         private const val PREFS_NAME = "CapacitorStorage"
@@ -57,6 +58,7 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
 
         private const val REQUEST_CODE_OPEN_APP = 100
         private const val REQUEST_CODE_ADD_ENTRY = 101
+        private const val REQUEST_CODE_CAMERA_ENTRY = 102
 
         private val MOOD_COLORS = mapOf(
             5 to Color.parseColor("#E5A93C"),
@@ -128,8 +130,10 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_mood_badge, View.GONE)
             }
 
+            views.setImageViewBitmap(R.id.widget_btn_camera_entry, createCameraButtonBitmap(context))
             views.setImageViewBitmap(R.id.widget_btn_add_entry, createAddButtonBitmap(context))
             views.setOnClickPendingIntent(R.id.widget_photo_root, createOpenAppPendingIntent(context))
+            views.setOnClickPendingIntent(R.id.widget_btn_camera_entry, createCameraEntryPendingIntent(context))
             views.setOnClickPendingIntent(R.id.widget_btn_add_entry, createAddEntryPendingIntent(context))
 
             appWidgetManager.updateAppWidget(appWidgetId, views)
@@ -144,6 +148,27 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getActivity(
                 context,
                 REQUEST_CODE_OPEN_APP,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun createCameraEntryPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("moodtracker://quick-entry?openSheet=1&camera=1"),
+                context,
+                MainActivity::class.java
+            ).apply {
+                putExtra(EXTRA_OPEN_SHEET, true)
+                putExtra(EXTRA_LAUNCH_CAMERA, true)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            return PendingIntent.getActivity(
+                context,
+                REQUEST_CODE_CAMERA_ENTRY,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -253,6 +278,56 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             val frame = RectF(cx - halfW, cy - halfH, cx + halfW, cy + halfH)
             canvas.drawRoundRect(frame, 4f * density, 4f * density, strokePaint)
             canvas.drawCircle(cx, cy, sizePx * 0.045f, strokePaint)
+
+            return bitmap
+        }
+
+        private fun createCameraButtonBitmap(context: Context): Bitmap {
+            val density = context.resources.displayMetrics.density
+            val sizePx = (40f * density).toInt().coerceAtLeast(64)
+            val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+
+            val center = sizePx / 2f
+            val radius = sizePx * 0.46f
+
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.FILL
+                color = Color.argb(204, 18, 18, 22)
+            }
+            canvas.drawCircle(center, center, radius, bgPaint)
+
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 1.2f * density
+                color = Color.argb(56, 255, 255, 255)
+            }
+            canvas.drawCircle(center, center, radius - borderPaint.strokeWidth / 2f, borderPaint)
+
+            val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                strokeWidth = 1.9f * density
+                color = Color.WHITE
+            }
+
+            val bodyHalfW = sizePx * 0.22f
+            val bodyTop = center - sizePx * 0.11f
+            val bodyBottom = center + sizePx * 0.17f
+            val bodyRect = RectF(center - bodyHalfW, bodyTop, center + bodyHalfW, bodyBottom)
+            canvas.drawRoundRect(bodyRect, 3f * density, 3f * density, iconPaint)
+
+            val tabPath = Path().apply {
+                moveTo(center - sizePx * 0.10f, bodyTop)
+                lineTo(center - sizePx * 0.06f, bodyTop - sizePx * 0.06f)
+                lineTo(center + sizePx * 0.06f, bodyTop - sizePx * 0.06f)
+                lineTo(center + sizePx * 0.10f, bodyTop)
+            }
+            canvas.drawPath(tabPath, iconPaint)
+
+            val lensCenterY = (bodyTop + bodyBottom) / 2f
+            canvas.drawCircle(center, lensCenterY, sizePx * 0.08f, iconPaint)
 
             return bitmap
         }

@@ -13,6 +13,7 @@ import { MinimalIcon } from './MinimalIcon';
 export interface QuickEntrySheetProps {
   isOpen: boolean;
   initialMood?: MoodLevel;
+  initialImageDataUrl?: string;
   editingLog?: MoodLog | null;
   onClose: () => void;
   onSave: (entry: Omit<MoodLog, 'id' | 'timestamp'> & { id?: string; timestamp?: number }) => void;
@@ -35,6 +36,7 @@ function toggleArrayItem(items: string[], id: string): string[] {
 export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   isOpen,
   initialMood,
+  initialImageDataUrl,
   editingLog,
   onClose,
   onSave,
@@ -50,6 +52,7 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(INITIAL_OPEN_SECTIONS);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -72,6 +75,12 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
       setImageDataUrl(undefined);
     }
   }, [isOpen, editingLog, initialMood]);
+
+  useEffect(() => {
+    if (!isOpen || !initialImageDataUrl) return;
+    setImageDataUrl(initialImageDataUrl);
+    setOpenSections((prev) => ({ ...prev, note: true }));
+  }, [isOpen, initialImageDataUrl]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -115,6 +124,15 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
     }
   };
 
+  const handleCameraClick = () => {
+    const bridge = (window as unknown as { AndroidBridge?: { launchCamera?: () => boolean } }).AndroidBridge;
+    if (bridge && typeof bridge.launchCamera === 'function') {
+      bridge.launchCamera();
+      return;
+    }
+    cameraInputRef.current?.click();
+  };
+
   const handleSubmit = () => {
     onSave({
       ...(editingLog ? { id: editingLog.id, timestamp: editingLog.timestamp } : {}),
@@ -146,14 +164,14 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
             }
           : undefined
       }
-      className={`py-2 px-1 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all duration-150 active:scale-95 focus:outline-none ${
+      className={`min-h-[64px] py-3 px-1.5 rounded-2xl border flex flex-col items-center justify-center gap-1.5 transition-all duration-150 active:scale-95 focus:outline-none ${
         isSelected
           ? 'font-medium'
-          : 'border-transparent text-zinc-400 hover:bg-zinc-800/40'
+          : 'border-zinc-800/40 bg-zinc-900/30 text-zinc-400 hover:bg-zinc-800/50'
       }`}
     >
-      <MinimalIcon name={preset.icon} size={18} strokeWidth={1.75} />
-      <span className="text-[10px] leading-tight truncate max-w-full">{preset.hint}</span>
+      <MinimalIcon name={preset.icon} size={22} strokeWidth={1.85} />
+      <span className="text-xs leading-tight truncate max-w-full">{preset.hint}</span>
     </button>
   );
 
@@ -170,19 +188,20 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
           type="button"
           onClick={() => toggleSection(key)}
           aria-expanded={isExpanded}
-          className="w-full py-3 flex items-center justify-between gap-3 text-left focus:outline-none group"
+          className="w-full min-h-[54px] py-3.5 px-2 -mx-2 rounded-xl flex items-center justify-between gap-3 text-left focus:outline-none active:bg-zinc-800/40 transition-colors group"
         >
-          <span className="text-xs font-medium text-zinc-400 group-hover:text-zinc-200 transition-colors">
+          <span className="text-sm font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors">
             {label}
           </span>
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             {summary}
-            <MinimalIcon
-              name={isExpanded ? 'ChevronUp' : 'ChevronDown'}
-              size={16}
-              strokeWidth={1.75}
-              className="shrink-0 text-zinc-500 group-hover:text-zinc-300 transition-colors"
-            />
+            <span className="w-8 h-8 rounded-lg bg-zinc-900/90 border border-zinc-800/70 flex items-center justify-center shrink-0 text-zinc-400 group-hover:text-zinc-200 transition-colors">
+              <MinimalIcon
+                name={isExpanded ? 'ChevronUp' : 'ChevronDown'}
+                size={20}
+                strokeWidth={1.9}
+              />
+            </span>
           </div>
         </button>
         {isExpanded && content}
@@ -200,12 +219,12 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
       aria-modal="true"
     >
       <div
-        className="w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3 pb-6 shadow-2xl flex flex-col max-h-[88vh]"
+        className="w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] shadow-2xl flex flex-col max-h-[90vh]"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Subtle drag handle */}
         <div className="flex justify-center mb-4 shrink-0">
-          <div className="w-9 h-1 rounded-full bg-zinc-700/60" />
+          <div className="w-10 h-1.5 rounded-full bg-zinc-700/60" />
         </div>
 
         {/* 1. Primary Mood Selector (Always Open at Top) */}
@@ -220,28 +239,28 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                 onClick={() => setMood(level)}
                 aria-label={preset.hint}
                 aria-pressed={isSelected}
-                className="flex flex-col items-center gap-1.5 group focus:outline-none"
+                className="flex-1 flex flex-col items-center gap-2 py-1 group focus:outline-none"
               >
                 <div
                   style={{
                     backgroundColor: isSelected ? preset.color : undefined,
                   }}
-                  className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-150 group-active:scale-95 ${
-                    isSelected ? 'scale-105' : 'bg-zinc-900/40'
+                  className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-150 group-active:scale-95 ${
+                    isSelected ? 'scale-105 shadow-md' : 'bg-zinc-900/60 border border-zinc-800/50'
                   }`}
                 >
                   <MinimalIcon
                     name={preset.icon}
-                    size={24}
-                    strokeWidth={isSelected ? 2 : 1.75}
+                    size={28}
+                    strokeWidth={isSelected ? 2.1 : 1.85}
                     color={isSelected ? '#141417' : preset.color}
-                    className={isSelected ? '' : 'opacity-60 group-hover:opacity-85 transition-opacity'}
+                    className={isSelected ? '' : 'opacity-70 group-hover:opacity-95 transition-opacity'}
                   />
                 </div>
                 <span
                   style={isSelected ? { color: preset.color } : undefined}
-                  className={`text-[10px] leading-none transition-colors ${
-                    isSelected ? 'font-medium' : 'text-zinc-500'
+                  className={`text-xs leading-none transition-colors ${
+                    isSelected ? 'font-semibold' : 'text-zinc-400'
                   }`}
                 >
                   {preset.hint}
@@ -252,24 +271,24 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
         </div>
 
         {/* 2. Collapsible Optional Sections */}
-        <div className="overflow-y-auto min-h-0 -mx-1 px-1">
+        <div className="overflow-y-auto min-h-0 -mx-2 px-2">
           {renderAccordionSection(
             'sensations',
             '体感',
             selectedSensationPresets.length > 0 && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 {selectedSensationPresets.map((preset) => (
                   <MinimalIcon
                     key={preset.id}
                     name={preset.icon}
-                    size={15}
-                    strokeWidth={1.75}
+                    size={18}
+                    strokeWidth={1.85}
                     color={activeMood.color}
                   />
                 ))}
               </div>
             ),
-            <div className="grid grid-cols-4 gap-2 pt-1 pb-3">
+            <div className="grid grid-cols-4 gap-2.5 pt-1.5 pb-4">
               {SENSATION_PRESETS.map((preset) =>
                 renderPresetOption(
                   preset,
@@ -284,19 +303,19 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
             'weather',
             '天候',
             selectedWeatherPreset && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 <MinimalIcon
                   name={selectedWeatherPreset.icon}
-                  size={15}
-                  strokeWidth={1.75}
+                  size={18}
+                  strokeWidth={1.85}
                   color={activeMood.color}
                 />
-                <span className="text-[11px]" style={{ color: activeMood.color }}>
+                <span className="text-xs font-medium" style={{ color: activeMood.color }}>
                   {selectedWeatherPreset.hint}
                 </span>
               </div>
             ),
-            <div className="grid grid-cols-5 gap-1.5 pt-1 pb-3">
+            <div className="grid grid-cols-4 gap-2.5 pt-1.5 pb-4">
               {WEATHER_PRESETS.map((preset) =>
                 renderPresetOption(
                   preset,
@@ -311,19 +330,19 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
             'activities',
             'していること',
             selectedActivityPresets.length > 0 && (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-2">
                 {selectedActivityPresets.map((preset) => (
                   <MinimalIcon
                     key={preset.id}
                     name={preset.icon}
-                    size={15}
-                    strokeWidth={1.75}
+                    size={18}
+                    strokeWidth={1.85}
                     color={activeMood.color}
                   />
                 ))}
               </div>
             ),
-            <div className="grid grid-cols-4 gap-2 pt-1 pb-3">
+            <div className="grid grid-cols-4 gap-2.5 pt-1.5 pb-4">
               {ACTIVITY_PRESETS.map((preset) =>
                 renderPresetOption(
                   preset,
@@ -338,12 +357,12 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
             'note',
             'メモ・画像',
             (trimmedNote || imageDataUrl) && (
-              <div className="flex items-center gap-1.5 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
                 {imageDataUrl && (
                   <MinimalIcon
                     name="ImagePlus"
-                    size={14}
-                    strokeWidth={1.75}
+                    size={18}
+                    strokeWidth={1.85}
                     color={activeMood.color}
                   />
                 )}
@@ -351,18 +370,18 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                   <>
                     <MinimalIcon
                       name="Edit3"
-                      size={14}
-                      strokeWidth={1.75}
+                      size={18}
+                      strokeWidth={1.85}
                       color={activeMood.color}
                     />
-                    <span className="text-[11px] text-zinc-400 truncate max-w-[110px]">
+                    <span className="text-xs text-zinc-400 truncate max-w-[120px]">
                       {notePreview}
                     </span>
                   </>
                 )}
               </div>
             ),
-            <div className="pt-1 pb-3 flex items-center gap-2.5">
+            <div className="pt-1.5 pb-4 flex items-center gap-3">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -370,35 +389,55 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                 onChange={handleImageChange}
                 className="hidden"
               />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleImageChange}
+                className="hidden"
+              />
 
               {imageDataUrl ? (
-                <div className="relative shrink-0 w-10 h-10">
+                <div className="relative shrink-0 w-12 h-12">
                   <img
                     src={imageDataUrl}
                     alt=""
-                    className="w-10 h-10 rounded-xl object-cover border border-zinc-800/80"
+                    className="w-12 h-12 rounded-xl object-cover border border-zinc-800/80"
                   />
                   <button
                     type="button"
                     onClick={() => setImageDataUrl(undefined)}
                     title="写真を削除"
                     aria-label="写真を削除"
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center"
+                    className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white active:scale-95 flex items-center justify-center shadow-md"
                   >
-                    <MinimalIcon name="X" size={11} strokeWidth={2.25} />
+                    <MinimalIcon name="X" size={14} strokeWidth={2.25} />
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isCompressing}
-                  title="写真を追加"
-                  aria-label="写真を追加"
-                  className="shrink-0 w-10 h-10 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50"
-                >
-                  <MinimalIcon name="ImagePlus" size={18} strokeWidth={1.75} />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleCameraClick}
+                    disabled={isCompressing}
+                    title="カメラで撮影"
+                    aria-label="カメラで撮影"
+                    className="w-12 h-12 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50"
+                  >
+                    <MinimalIcon name="Camera" size={22} strokeWidth={1.85} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isCompressing}
+                    title="ギャラリーから選択"
+                    aria-label="ギャラリーから選択"
+                    className="w-12 h-12 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50"
+                  >
+                    <MinimalIcon name="ImagePlus" size={22} strokeWidth={1.85} />
+                  </button>
+                </div>
               )}
 
               <input
@@ -413,14 +452,14 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                 }}
                 placeholder="ひとことメモ（任意）"
                 aria-label="メモ"
-                className="flex-1 min-w-0 h-10 bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-3.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-700"
+                className="flex-1 min-w-0 h-12 bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-4 text-base text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
               />
             </div>,
           )}
         </div>
 
         {/* 3. Always-Visible Bottom Action Bar */}
-        <div className="border-t border-zinc-800/60 pt-3 mt-1 flex items-center justify-between gap-3 shrink-0">
+        <div className="border-t border-zinc-800/60 pt-3.5 mt-1 flex items-center justify-between gap-3 shrink-0">
           {editingLog && onDelete && (
             <button
               type="button"
@@ -428,9 +467,9 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                 onDelete(editingLog.id);
                 onClose();
               }}
-              className="shrink-0 h-11 px-3 rounded-xl flex items-center gap-1.5 text-xs text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors active:scale-95"
+              className="shrink-0 h-12 px-4 rounded-xl flex items-center gap-2 text-sm text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors active:scale-95"
             >
-              <MinimalIcon name="Trash2" size={16} strokeWidth={1.75} />
+              <MinimalIcon name="Trash2" size={18} strokeWidth={1.85} />
               <span>削除</span>
             </button>
           )}
@@ -442,9 +481,9 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
               backgroundColor: activeMood.color,
               color: '#141417',
             }}
-            className="flex-1 h-11 rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
+            className="flex-1 h-12 rounded-xl font-semibold text-base flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
           >
-            <MinimalIcon name="Check" size={18} strokeWidth={2.25} color="#141417" />
+            <MinimalIcon name="Check" size={20} strokeWidth={2.25} color="#141417" />
             <span>記録する</span>
           </button>
         </div>

@@ -36,5 +36,25 @@ export interface NotificationSlot {
 export interface AppSettings {
   notificationsEnabled: boolean;
   slots: NotificationSlot[];
-  showWidgetPreview: boolean; // Toggle in-app Android home widget bar preview
 }
+
+export interface RoutineItem {
+  id: string;
+  title: string;
+  icon: string;
+  order: number;
+  archived?: boolean;
+  targetCount?: number; // Reserved for multi-check routines (default 1)
+}
+
+export interface RoutineDayLog {
+  id: string;           // `${dateKey}_${routineId}`
+  dateKey: string;      // "YYYY-MM-DD"
+  routineId: string;
+  completed: boolean;
+  count?: number;       // Reserved for multi-check routines (default completed ? 1 : 0)
+  comment?: string;     // Per-completion daily note/comment
+  updatedAt: number;
+}
+
+export type AppTab = 'timeline' | 'routines' | 'pixels';

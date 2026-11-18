@@ -1,21 +1,34 @@
 package com.minimal.moodtracker
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Base64
 import android.view.ViewGroup
 import android.view.Window
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
 
 /**
  * Standalone Native Android Activity hosting the offline WebView bundle and bridging
@@ -26,10 +39,13 @@ class MainActivity : Activity() {
     private var webView: WebView? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var pendingTestNotification: Boolean = false
+    private var isPageLoaded: Boolean = false
+    private var pendingCameraPhotoDataUrl: String? = null
 
     private data class QuickEntryRequest(
         val mood: Int?,
-        val openSheet: Boolean
+        val openSheet: Boolean,
+        val launchCamera: Boolean = false
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,7 +60,7 @@ class MainActivity : Activity() {
         }
 
         val wv = WebView(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
+            layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
@@ -64,8 +80,18 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    isPageLoaded = true
+                    pendingCameraPhotoDataUrl?.let { dataUrl ->
+                        pendingCameraPhotoDataUrl = null
+                        deliverCameraPhotoToWebView(dataUrl)
+                    }
                     extractQuickEntryRequest(intent)?.let { req ->
-                        dispatchQuickEntryEvent(req)
+                        clearQuickEntryIntent(intent)
+                        if (req.launchCamera) {
+                            launchCameraCapture()
+                        } else {
+                            dispatchQuickEntryEvent(req)
+                        }
                     }
                 }
             }
@@ -96,7 +122,45 @@ class MainActivity : Activity() {
             addJavascriptInterface(AndroidWidgetBridge(this@MainActivity), "AndroidBridge")
         }
 
-        setContentView(wv)
+        val rootContainer = FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(Color.parseColor("#111214"))
+            setOnApplyWindowInsetsListener { view, insets ->
+                if (Build.VERSION.SDK_INT >= 30) {
+                    val bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
+                    )
+                    view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                    WindowInsets.CONSUMED
+                } else {
+                    @Suppress("DEPRECATION")
+                    view.setPadding(
+                        insets.systemWindowInsetLeft,
+                        insets.systemWindowInsetTop,
+                        insets.systemWindowInsetRight,
+                        insets.systemWindowInsetBottom
+                    )
+                    @Suppress("DEPRECATION")
+                    insets.consumeSystemWindowInsets()
+                }
+            }
+            addView(wv)
+        }
+
+        setContentView(rootContainer)
+        if (Build.VERSION.SDK_INT >= 30) {
+            runCatching {
+                window?.insetsController?.setSystemBarsAppearance(
+                    0,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                        WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                )
+            }
+        }
+        rootContainer.requestApplyInsets()
         this.webView = wv
 
         val initialReq = extractQuickEntryRequest(intent)
@@ -117,7 +181,12 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         extractQuickEntryRequest(intent)?.let { request ->
-            dispatchQuickEntryEvent(request)
+            clearQuickEntryIntent(intent)
+            if (request.launchCamera) {
+                launchCameraCapture()
+            } else {
+                dispatchQuickEntryEvent(request)
+            }
         }
     }
 
@@ -132,6 +201,18 @@ class MainActivity : Activity() {
                 null
             }
             callback.onReceiveValue(resultUri)
+        } else if (requestCode == REQUEST_CAPTURE_PHOTO && resultCode == RESULT_OK) {
+            val captureFile = File(cacheDir, "camera_capture.jpg")
+            @Suppress("DEPRECATION")
+            val fallbackBitmap = data?.extras?.get("data") as? Bitmap
+            Thread {
+                val dataUrl = processCapturedPhoto(captureFile, fallbackBitmap)
+                if (dataUrl != null) {
+                    runOnUiThread {
+                        deliverCameraPhotoToWebView(dataUrl)
+                    }
+                }
+            }.start()
         }
     }
 
@@ -153,19 +234,159 @@ class MainActivity : Activity() {
             val mood = data.getQueryParameter("mood")?.toIntOrNull()?.takeIf { it in 1..5 }
             val openSheetParam = data.getQueryParameter("openSheet")?.lowercase()
             val openSheet = openSheetParam == "1" || openSheetParam == "true"
-            if (mood != null || openSheet) {
-                return QuickEntryRequest(mood = mood, openSheet = true)
+            val cameraParam = data.getQueryParameter("camera")?.lowercase()
+            val launchCamera = cameraParam == "1" || cameraParam == "true"
+            if (mood != null || openSheet || launchCamera) {
+                return QuickEntryRequest(
+                    mood = mood,
+                    openSheet = true,
+                    launchCamera = launchCamera
+                )
             }
         }
 
         val extraMood = intent.getIntExtra(QuickMoodWidgetProvider.EXTRA_MOOD_LEVEL, 0)
             .takeIf { it in 1..5 }
         val extraOpenSheet = intent.getBooleanExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_SHEET, false)
-        if (extraMood != null || extraOpenSheet) {
-            return QuickEntryRequest(mood = extraMood, openSheet = true)
+        val extraLaunchCamera = intent.getBooleanExtra(PhotoMoodWidgetProvider.EXTRA_LAUNCH_CAMERA, false)
+        if (extraMood != null || extraOpenSheet || extraLaunchCamera) {
+            return QuickEntryRequest(
+                mood = extraMood,
+                openSheet = true,
+                launchCamera = extraLaunchCamera
+            )
         }
 
         return null
+    }
+
+    private fun clearQuickEntryIntent(intent: Intent?) {
+        if (intent == null) return
+        intent.data = null
+        intent.removeExtra(QuickMoodWidgetProvider.EXTRA_MOOD_LEVEL)
+        intent.removeExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_SHEET)
+        intent.removeExtra(PhotoMoodWidgetProvider.EXTRA_LAUNCH_CAMERA)
+    }
+
+    fun launchCameraCapture() {
+        runCatching {
+            val captureFile = File(cacheDir, "camera_capture.jpg")
+            if (captureFile.exists()) {
+                captureFile.delete()
+            }
+            captureFile.createNewFile()
+
+            val photoUri = Uri.parse("content://${CameraFileProvider.AUTHORITY}/camera_capture.jpg")
+            val captureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+                putExtra(MediaStore.EXTRA_OUTPUT, photoUri)
+                clipData = ClipData.newRawUri("", photoUri)
+                addFlags(
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            startActivityForResult(captureIntent, REQUEST_CAPTURE_PHOTO)
+        }
+    }
+
+    private fun processCapturedPhoto(captureFile: File, fallbackBitmap: Bitmap?): String? {
+        return try {
+            var bitmap: Bitmap? = null
+            var rotationDegrees = 0f
+
+            if (captureFile.exists() && captureFile.length() > 0L) {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(captureFile.absolutePath, bounds)
+                if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                    val maxDim = 960
+                    var sampleSize = 1
+                    while (
+                        bounds.outWidth / sampleSize > maxDim * 2 ||
+                        bounds.outHeight / sampleSize > maxDim * 2
+                    ) {
+                        sampleSize *= 2
+                    }
+                    val decodeOpts = BitmapFactory.Options().apply {
+                        inSampleSize = sampleSize
+                    }
+                    bitmap = BitmapFactory.decodeFile(captureFile.absolutePath, decodeOpts)
+                    rotationDegrees = readExifRotationDegrees(captureFile.absolutePath)
+                }
+            }
+
+            if (bitmap == null && fallbackBitmap != null) {
+                bitmap = fallbackBitmap
+            }
+            val decoded = bitmap ?: return null
+
+            val rotated = if (rotationDegrees != 0f) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees) }
+                Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+                    .also { if (it !== decoded) decoded.recycle() }
+            } else {
+                decoded
+            }
+
+            val maxDim = 960
+            val finalBitmap = if (rotated.width > maxDim || rotated.height > maxDim) {
+                val scale = minOf(
+                    maxDim.toFloat() / rotated.width.toFloat(),
+                    maxDim.toFloat() / rotated.height.toFloat()
+                )
+                val targetW = (rotated.width * scale).toInt().coerceAtLeast(1)
+                val targetH = (rotated.height * scale).toInt().coerceAtLeast(1)
+                Bitmap.createScaledBitmap(rotated, targetW, targetH, true)
+                    .also { if (it !== rotated) rotated.recycle() }
+            } else {
+                rotated
+            }
+
+            val out = ByteArrayOutputStream()
+            finalBitmap.compress(Bitmap.CompressFormat.JPEG, 82, out)
+            finalBitmap.recycle()
+
+            val base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            "data:image/jpeg;base64,$base64"
+        } catch (_: Exception) {
+            null
+        } catch (_: OutOfMemoryError) {
+            null
+        }
+    }
+
+    private fun readExifRotationDegrees(filePath: String): Float {
+        return try {
+            val exif = ExifInterface(filePath)
+            when (exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                else -> 0f
+            }
+        } catch (_: Exception) {
+            0f
+        }
+    }
+
+    private fun deliverCameraPhotoToWebView(dataUrl: String) {
+        val wv = webView
+        if (!isPageLoaded || wv == null) {
+            pendingCameraPhotoDataUrl = dataUrl
+            return
+        }
+        val quotedDataUrl = JSONObject.quote(dataUrl)
+        val script = """
+            (function() {
+              var event = new CustomEvent('moodtracker:camera-photo', {
+                cancelable: true,
+                detail: { imageDataUrl: $quotedDataUrl, openSheet: true }
+              });
+              window.dispatchEvent(event);
+            })();
+        """.trimIndent()
+        wv.post {
+            wv.evaluateJavascript(script, null)
+        }
     }
 
     private fun dispatchQuickEntryEvent(request: QuickEntryRequest) {
@@ -300,10 +521,19 @@ class MainActivity : Activity() {
             }
             ReminderReceiver.saveAndSchedule(context, enabled, timesCsv)
         }
+
+        @JavascriptInterface
+        fun launchCamera(): Boolean {
+            activity.runOnUiThread {
+                activity.launchCameraCapture()
+            }
+            return true
+        }
     }
 
     companion object {
         private const val REQUEST_SELECT_FILE = 2001
         private const val REQUEST_POST_NOTIFICATIONS = 2002
+        private const val REQUEST_CAPTURE_PHOTO = 2003
     }
 }

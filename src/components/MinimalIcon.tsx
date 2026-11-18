@@ -48,19 +48,23 @@ import {
   Edit3,
   Calendar,
   List,
+  ListChecks,
   LayoutGrid,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   ChevronUp,
+  Camera,
   type LucideIcon,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, LucideIcon> = {
+  Camera,
   ChevronDown,
   ChevronUp,
   Calendar,
   List,
+  ListChecks,
   LayoutGrid,
   ChevronLeft,
   ChevronRight,

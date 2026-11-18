@@ -1,4 +1,4 @@
-import { MoodLevel, MoodPreset, IconPreset } from '../types';
+import { MoodLevel, MoodPreset, IconPreset, RoutineItem } from '../types';
 
 /**
  * Calm, muted, cohesive Nordic/earthy palette inspired by Moodistory.
@@ -86,4 +86,43 @@ export const ACTIVITY_PRESETS: IconPreset[] = [
   { id: 'music', icon: 'Headphones', hint: '音楽' },
   { id: 'shop', icon: 'ShoppingBag', hint: '買い物' },
   { id: 'bath', icon: 'Droplets', hint: '入浴' },
+];
+
+export const ROUTINE_ICON_OPTIONS: Array<{ icon: string; label: string }> = [
+  { icon: 'BookOpen', label: '読書・学習' },
+  { icon: 'Footprints', label: '散歩・運動' },
+  { icon: 'Activity', label: 'ストレッチ' },
+  { icon: 'Droplets', label: '水分・入浴' },
+  { icon: 'Bed', label: '睡眠・早寝' },
+  { icon: 'Coffee', label: '一息・瞑想' },
+  { icon: 'Utensils', label: '食事・自炊' },
+  { icon: 'Sparkles', label: 'セルフケア' },
+  { icon: 'Home', label: '片付け・家事' },
+  { icon: 'Briefcase', label: '仕事・作業' },
+  { icon: 'Headphones', label: '音楽・趣味' },
+  { icon: 'Sun', label: '朝活・日光' },
+];
+
+export const DEFAULT_ROUTINES: RoutineItem[] = [
+  {
+    id: 'routine-reading',
+    title: '読書',
+    icon: 'BookOpen',
+    order: 0,
+    targetCount: 1,
+  },
+  {
+    id: 'routine-walk',
+    title: '散歩・運動',
+    icon: 'Footprints',
+    order: 1,
+    targetCount: 1,
+  },
+  {
+    id: 'routine-stretch',
+    title: 'ストレッチ',
+    icon: 'Activity',
+    order: 2,
+    targetCount: 1,
+  },
 ];

@@ -81,6 +81,12 @@
             </intent-filter>
         </receiver>
 
+        <provider
+            android:name=".CameraFileProvider"
+            android:authorities="com.minimal.moodtracker.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
     </application>
 
 </manifest>

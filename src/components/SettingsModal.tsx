@@ -32,14 +32,14 @@ const ToggleSwitch: React.FC<ToggleSwitchProps> = ({
     aria-checked={checked}
     aria-label={ariaLabel}
     onClick={onChange}
-    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 ${
+    className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-600 ${
       checked
         ? 'border-emerald-500/50 bg-emerald-500/80'
         : 'border-zinc-700 bg-zinc-800'
     }`}
   >
     <span
-      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-150 ${
+      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform duration-150 ${
         checked ? 'translate-x-6' : 'translate-x-1'
       }`}
     />
@@ -140,13 +140,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTestFeedback(ok ? 'sent' : 'denied');
   };
 
-  const handleToggleWidget = () => {
-    onUpdateSettings({
-      ...settings,
-      showWidgetPreview: !settings.showWidgetPreview,
-    });
-  };
-
   return (
     <div
       role="dialog"
@@ -157,37 +150,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-t-3xl border border-zinc-800/90 bg-zinc-950 p-5 pb-7 shadow-2xl sm:rounded-3xl sm:pb-5"
+        className="w-full max-w-md rounded-t-3xl border border-zinc-800/90 bg-zinc-950 p-5 pb-[calc(env(safe-area-inset-bottom,0px)+1.75rem)] shadow-2xl sm:rounded-3xl sm:pb-5"
       >
         {/* Header */}
         <div className="mb-5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-zinc-300">
-            <MinimalIcon name="SlidersHorizontal" size={18} strokeWidth={1.75} />
-            <span className="text-sm font-medium tracking-wide">設定</span>
+          <div className="flex items-center gap-2.5 text-zinc-200">
+            <MinimalIcon name="SlidersHorizontal" size={20} strokeWidth={1.85} />
+            <span className="text-base font-medium tracking-wide">設定</span>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close settings"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-800 bg-zinc-900 text-zinc-400 transition-colors hover:text-zinc-100"
+            className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-400 transition-colors hover:text-zinc-100 active:scale-95"
           >
-            <MinimalIcon name="X" size={16} strokeWidth={1.75} />
+            <MinimalIcon name="X" size={20} strokeWidth={1.85} />
           </button>
         </div>
 
         <div className="space-y-4">
           {/* Master Reminder Toggle */}
-          <div className="flex items-center justify-between rounded-2xl border border-zinc-900 bg-zinc-900/55 px-4 py-3">
+          <div className="flex items-center justify-between rounded-2xl border border-zinc-900 bg-zinc-900/55 px-4 py-3.5 min-h-[54px]">
             <div className="flex items-center gap-3 text-zinc-200">
               <MinimalIcon
                 name={settings.notificationsEnabled ? 'Bell' : 'BellOff'}
-                size={18}
-                strokeWidth={1.75}
+                size={20}
+                strokeWidth={1.85}
                 className={
                   settings.notificationsEnabled ? 'text-emerald-400' : 'text-zinc-500'
                 }
               />
-              <span className="text-xs tracking-wide text-zinc-300">リマインダー</span>
+              <span className="text-sm tracking-wide text-zinc-200">リマインダー</span>
             </div>
             <ToggleSwitch
               checked={settings.notificationsEnabled}
@@ -197,44 +190,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Notification Time Slots */}
-          <div className="rounded-2xl border border-zinc-900 bg-zinc-900/40 p-3.5 space-y-2.5">
+          <div className="rounded-2xl border border-zinc-900 bg-zinc-900/40 p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="font-mono text-[11px] tracking-wider text-zinc-500">
+              <span className="font-mono text-xs tracking-wider text-zinc-400">
                 NOTIFICATION SLOTS
               </span>
               <button
                 type="button"
                 onClick={handleAddSlot}
                 aria-label="Add reminder slot"
-                className="flex h-7 w-7 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-white"
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900 text-zinc-300 transition-colors hover:border-zinc-700 hover:text-white active:scale-95"
               >
-                <MinimalIcon name="Plus" size={14} strokeWidth={2} />
+                <MinimalIcon name="Plus" size={18} strokeWidth={2} />
               </button>
             </div>
 
             {settings.slots.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {settings.slots.map((slot) => (
                   <div
                     key={slot.id}
-                    className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3 py-2"
+                    className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3.5 py-2.5 min-h-[52px]"
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-3">
                       <MinimalIcon
                         name="Clock"
-                        size={15}
-                        strokeWidth={1.75}
+                        size={18}
+                        strokeWidth={1.85}
                         className="text-zinc-500"
                       />
                       <input
                         type="time"
                         value={slot.time}
                         onChange={(e) => handleChangeSlotTime(slot.id, e.target.value)}
-                        className="bg-transparent font-mono text-sm text-zinc-200 [color-scheme:dark] focus:outline-none"
+                        className="bg-transparent font-mono text-base text-zinc-200 [color-scheme:dark] focus:outline-none py-1"
                       />
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
                       <ToggleSwitch
                         checked={slot.enabled}
                         onChange={() => handleToggleSlot(slot.id)}
@@ -244,9 +237,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         type="button"
                         onClick={() => handleDeleteSlot(slot.id)}
                         aria-label={`Delete slot ${slot.time}`}
-                        className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-rose-400"
+                        className="flex h-10 w-10 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-rose-400 active:scale-95"
                       >
-                        <MinimalIcon name="X" size={14} strokeWidth={1.75} />
+                        <MinimalIcon name="X" size={18} strokeWidth={1.85} />
                       </button>
                     </div>
                   </div>
@@ -258,11 +251,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               type="button"
               onClick={handleSendTest}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 py-2 text-xs text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800"
+              className="flex w-full min-h-[46px] items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 py-2.5 text-sm text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 active:scale-[0.99]"
             >
               <MinimalIcon
                 name={testFeedback === 'sent' ? 'Check' : 'Bell'}
-                size={14}
+                size={18}
                 strokeWidth={1.85}
                 className={
                   testFeedback === 'sent'
@@ -282,33 +275,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* Android Home Widget Bar Simulator Toggle */}
-          <div className="flex items-center justify-between rounded-2xl border border-zinc-900 bg-zinc-900/55 px-4 py-3">
-            <div className="flex items-center gap-3 text-zinc-200">
-              <MinimalIcon
-                name="Smartphone"
-                size={18}
-                strokeWidth={1.75}
-                className={
-                  settings.showWidgetPreview ? 'text-sky-400' : 'text-zinc-500'
-                }
-              />
-              <span className="text-xs tracking-wide text-zinc-300">
-                Android ウィジェットバー
-              </span>
-            </div>
-            <ToggleSwitch
-              checked={settings.showWidgetPreview}
-              onChange={handleToggleWidget}
-              ariaLabel="Toggle Android home widget bar preview"
-            />
-          </div>
-
           {/* Import & Export Buttons */}
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-2 gap-3">
             {onImportFile && (
-              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-800/90 bg-zinc-900/75 py-3 text-xs text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800">
-                <MinimalIcon name="Upload" size={16} strokeWidth={1.75} />
+              <label className="flex min-h-[48px] cursor-pointer items-center justify-center gap-2 rounded-2xl border border-zinc-800/90 bg-zinc-900/75 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 active:scale-[0.99]">
+                <MinimalIcon name="Upload" size={18} strokeWidth={1.85} />
                 <span>{importStatus || 'CSV/JSON 読込'}</span>
                 <input
                   type="file"
@@ -328,11 +299,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <button
               type="button"
               onClick={onExportJson}
-              className={`flex items-center justify-center gap-2 rounded-2xl border border-zinc-800/90 bg-zinc-900/75 py-3 text-xs text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 ${
+              className={`flex min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-zinc-800/90 bg-zinc-900/75 py-3 text-sm text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 active:scale-[0.99] ${
                 onImportFile ? '' : 'col-span-2'
               }`}
             >
-              <MinimalIcon name="Download" size={16} strokeWidth={1.75} />
+              <MinimalIcon name="Download" size={18} strokeWidth={1.85} />
               <span>JSON 書き出し</span>
             </button>
           </div>

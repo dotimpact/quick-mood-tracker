@@ -1,9 +1,12 @@
-import { MoodLog, AppSettings, MoodLevel } from '../types';
+import { MoodLog, AppSettings, MoodLevel, RoutineItem, RoutineDayLog } from '../types';
+import { DEFAULT_ROUTINES } from '../constants/presets';
 import { syncNativeNotifications } from './notification';
 
 const DB_NAME = 'MinimalMoodTrackerDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_LOGS = 'logs';
+const STORE_ROUTINES = 'routines';
+const STORE_ROUTINE_LOGS = 'routine_logs';
 const SETTINGS_KEY = 'minimal_mood_settings_v1';
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -13,8 +16,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     { id: 'noon', time: '13:00', enabled: false },
     { id: 'night', time: '21:30', enabled: true },
   ],
-  showWidgetPreview: true,
 };
+
+export function getCalendarDayKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 function createSampleCafeSunsetSvg(): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
@@ -88,6 +97,13 @@ function openDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_LOGS)) {
         const store = db.createObjectStore(STORE_LOGS, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(STORE_ROUTINES)) {
+        db.createObjectStore(STORE_ROUTINES, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORE_ROUTINE_LOGS)) {
+        const routineLogStore = db.createObjectStore(STORE_ROUTINE_LOGS, { keyPath: 'id' });
+        routineLogStore.createIndex('dateKey', 'dateKey', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -200,6 +216,125 @@ export async function seedInitialLogsIfEmpty(): Promise<MoodLog[]> {
   return getAllLogs();
 }
 
+export async function getAllRoutines(): Promise<RoutineItem[]> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_ROUTINES, 'readonly');
+      const store = tx.objectStore(STORE_ROUTINES);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const items = (req.result as RoutineItem[]) || [];
+        items.sort((a, b) => a.order - b.order);
+        resolve(items);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    const raw = localStorage.getItem('fallback_routines');
+    const items: RoutineItem[] = raw ? JSON.parse(raw) : [];
+    return items.sort((a, b) => a.order - b.order);
+  }
+}
+
+export async function saveRoutine(item: RoutineItem): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ROUTINES, 'readwrite');
+      tx.objectStore(STORE_ROUTINES).put(item);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    const existing = await getAllRoutines();
+    const filtered = existing.filter((i) => i.id !== item.id);
+    const updated = [...filtered, item].sort((a, b) => a.order - b.order);
+    localStorage.setItem('fallback_routines', JSON.stringify(updated));
+  }
+}
+
+export async function saveAllRoutines(items: RoutineItem[]): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ROUTINES, 'readwrite');
+      const store = tx.objectStore(STORE_ROUTINES);
+      store.clear();
+      for (const item of items) {
+        store.put(item);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    const sorted = [...items].sort((a, b) => a.order - b.order);
+    localStorage.setItem('fallback_routines', JSON.stringify(sorted));
+  }
+}
+
+export async function deleteRoutine(id: string): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ROUTINES, 'readwrite');
+      tx.objectStore(STORE_ROUTINES).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    const existing = await getAllRoutines();
+    localStorage.setItem(
+      'fallback_routines',
+      JSON.stringify(existing.filter((i) => i.id !== id))
+    );
+  }
+}
+
+export async function seedInitialRoutinesIfEmpty(): Promise<RoutineItem[]> {
+  const existing = await getAllRoutines();
+  if (existing.length > 0) {
+    return existing;
+  }
+  await saveAllRoutines(DEFAULT_ROUTINES);
+  return getAllRoutines();
+}
+
+export async function getAllRoutineLogs(): Promise<RoutineDayLog[]> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_ROUTINE_LOGS, 'readonly');
+      const store = tx.objectStore(STORE_ROUTINE_LOGS);
+      const req = store.getAll();
+      req.onsuccess = () => {
+        const items = (req.result as RoutineDayLog[]) || [];
+        resolve(items);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    const raw = localStorage.getItem('fallback_routine_logs');
+    return raw ? JSON.parse(raw) : [];
+  }
+}
+
+export async function saveRoutineDayLog(entry: RoutineDayLog): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ROUTINE_LOGS, 'readwrite');
+      tx.objectStore(STORE_ROUTINE_LOGS).put(entry);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    const existing = await getAllRoutineLogs();
+    const filtered = existing.filter((i) => i.id !== entry.id);
+    localStorage.setItem('fallback_routine_logs', JSON.stringify([...filtered, entry]));
+  }
+}
+
 function mapMoodistoryEventsAndNotes(
   eventsStr: string,
   noteText: string
@@ -269,6 +404,61 @@ export async function importMoodistoryCsvOrJson(rawContent: string): Promise<num
 
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     const parsed = JSON.parse(trimmed);
+    if (
+      parsed &&
+      !Array.isArray(parsed) &&
+      typeof parsed === 'object' &&
+      ('logs' in parsed || 'routines' in parsed || 'routineLogs' in parsed)
+    ) {
+      if (Array.isArray(parsed.routines)) {
+        for (const r of parsed.routines) {
+          if (r && typeof r.id === 'string' && typeof r.title === 'string') {
+            await saveRoutine({
+              id: r.id,
+              title: r.title,
+              icon: typeof r.icon === 'string' ? r.icon : 'Circle',
+              order: typeof r.order === 'number' ? r.order : 0,
+              archived: Boolean(r.archived),
+              targetCount: typeof r.targetCount === 'number' ? r.targetCount : 1,
+            });
+          }
+        }
+      }
+      if (Array.isArray(parsed.routineLogs)) {
+        for (const rl of parsed.routineLogs) {
+          if (rl && typeof rl.dateKey === 'string' && typeof rl.routineId === 'string') {
+            await saveRoutineDayLog({
+              id: rl.id || `${rl.dateKey}_${rl.routineId}`,
+              dateKey: rl.dateKey,
+              routineId: rl.routineId,
+              completed: Boolean(rl.completed),
+              count: typeof rl.count === 'number' ? rl.count : rl.completed ? 1 : 0,
+              comment: typeof rl.comment === 'string' ? rl.comment : undefined,
+              updatedAt: typeof rl.updatedAt === 'number' ? rl.updatedAt : Date.now(),
+            });
+          }
+        }
+      }
+      const logsArr = Array.isArray(parsed.logs) ? parsed.logs : [];
+      for (let i = 0; i < logsArr.length; i++) {
+        const item = logsArr[i];
+        if (item && typeof item.timestamp === 'number' && typeof item.mood === 'number') {
+          await saveLog({
+            id: item.id || `import-${item.timestamp}-${i}`,
+            timestamp: item.timestamp,
+            mood: Math.min(5, Math.max(1, Math.round(item.mood))) as MoodLevel,
+            weather: item.weather,
+            sensations: Array.isArray(item.sensations) ? item.sensations : [],
+            activities: Array.isArray(item.activities) ? item.activities : [],
+            note: item.note,
+            imageDataUrl: item.imageDataUrl,
+          });
+          importedCount++;
+        }
+      }
+      return importedCount;
+    }
+
     const arr = Array.isArray(parsed) ? parsed : [parsed];
     for (let i = 0; i < arr.length; i++) {
       const item = arr[i];
