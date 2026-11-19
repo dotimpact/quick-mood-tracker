@@ -139,7 +139,8 @@ class MainActivity : Activity() {
                     val bars = insets.getInsets(
                         WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
                     )
-                    view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                    val ime = insets.getInsets(WindowInsets.Type.ime())
+                    view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
                     WindowInsets.CONSUMED
                 } else {
                     @Suppress("DEPRECATION")
