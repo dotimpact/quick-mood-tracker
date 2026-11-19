@@ -1,5 +1,6 @@
 package com.minimal.moodtracker
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -14,6 +15,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.net.Uri
+import android.os.Build
 import android.util.Base64
 import android.view.View
 import android.widget.RemoteViews
@@ -22,7 +24,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 2x2 photo + quick-add home screen widget showing the latest photo entry and mood badge.
+ * 2x2 photo + quick-add home screen widget showing the latest photo entry, mood badge,
+ * minimal daily routine circular progress, and gentle post-interval nudge on the add button.
  */
 class PhotoMoodWidgetProvider : AppWidgetProvider() {
 
@@ -34,6 +37,7 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId)
         }
+        scheduleNextNudgeRefresh(context)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -49,16 +53,27 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
     companion object {
         const val EXTRA_OPEN_SHEET = "com.minimal.moodtracker.EXTRA_OPEN_SHEET"
         const val EXTRA_LAUNCH_CAMERA = "com.minimal.moodtracker.EXTRA_LAUNCH_CAMERA"
+        const val EXTRA_OPEN_TAB = "com.minimal.moodtracker.EXTRA_OPEN_TAB"
         const val ACTION_REFRESH_WIDGET = "com.minimal.moodtracker.ACTION_REFRESH_PHOTO_WIDGET"
 
         private const val PREFS_NAME = "CapacitorStorage"
+        private const val KEY_LAST_TIMESTAMP = "widget_last_timestamp"
         private const val KEY_LAST_PHOTO_DATA = "widget_last_photo_data"
         private const val KEY_LAST_PHOTO_MOOD = "widget_last_photo_mood"
         private const val KEY_LAST_PHOTO_TIMESTAMP = "widget_last_photo_timestamp"
+        private const val KEY_ROUTINE_DATE = "widget_routine_date"
+        private const val KEY_ROUTINE_COMPLETED = "widget_routine_completed"
+        private const val KEY_ROUTINE_TOTAL = "widget_routine_total"
+        private const val KEY_NUDGE_INTERVAL_MINUTES = "widget_nudge_interval_minutes"
+
+        private const val DEFAULT_NUDGE_INTERVAL_MINUTES = 60
+        private const val DEFAULT_ROUTINE_TOTAL = 3
 
         private const val REQUEST_CODE_OPEN_APP = 100
         private const val REQUEST_CODE_ADD_ENTRY = 101
         private const val REQUEST_CODE_CAMERA_ENTRY = 102
+        private const val REQUEST_CODE_ROUTINES_TAB = 103
+        private const val REQUEST_CODE_NUDGE_REFRESH = 190
 
         private val MOOD_COLORS = mapOf(
             5 to Color.parseColor("#E5A93C"),
@@ -78,6 +93,7 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             for (widgetId in widgetIds) {
                 updateAppWidget(context, manager, widgetId)
             }
+            scheduleNextNudgeRefresh(context)
         }
 
         private fun updateAppWidget(
@@ -130,9 +146,18 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
                 views.setViewVisibility(R.id.widget_mood_badge, View.GONE)
             }
 
+            val (routineCompleted, routineTotal) = readRoutineProgress(context)
+            val nudgeActive = isPostNudgeActive(context)
+
+            views.setImageViewBitmap(
+                R.id.widget_btn_routine_progress,
+                createRoutineProgressBitmap(context, routineCompleted, routineTotal)
+            )
             views.setImageViewBitmap(R.id.widget_btn_camera_entry, createCameraButtonBitmap(context))
-            views.setImageViewBitmap(R.id.widget_btn_add_entry, createAddButtonBitmap(context))
+            views.setImageViewBitmap(R.id.widget_btn_add_entry, createAddButtonBitmap(context, nudgeActive))
+
             views.setOnClickPendingIntent(R.id.widget_photo_root, createOpenAppPendingIntent(context))
+            views.setOnClickPendingIntent(R.id.widget_btn_routine_progress, createRoutinesTabPendingIntent(context))
             views.setOnClickPendingIntent(R.id.widget_btn_camera_entry, createCameraEntryPendingIntent(context))
             views.setOnClickPendingIntent(R.id.widget_btn_add_entry, createAddEntryPendingIntent(context))
 
@@ -148,6 +173,26 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             return PendingIntent.getActivity(
                 context,
                 REQUEST_CODE_OPEN_APP,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        private fun createRoutinesTabPendingIntent(context: Context): PendingIntent {
+            val intent = Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("moodtracker://quick-entry?tab=routines"),
+                context,
+                MainActivity::class.java
+            ).apply {
+                putExtra(EXTRA_OPEN_TAB, "routines")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            return PendingIntent.getActivity(
+                context,
+                REQUEST_CODE_ROUTINES_TAB,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
@@ -199,6 +244,18 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             return prefs.all[key] as? String
         }
 
+        private fun readLongPref(context: Context, key: String): Long? {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val rawValue = prefs.all[key] ?: return null
+            val parsed = when (rawValue) {
+                is Number -> rawValue.toLong()
+                is String -> rawValue.trim().toLongOrNull()
+                    ?: rawValue.trim().toDoubleOrNull()?.toLong()
+                else -> null
+            }
+            return parsed?.takeIf { it > 0L }
+        }
+
         private fun readLastPhotoMood(context: Context): Int? {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val rawValue = prefs.all[KEY_LAST_PHOTO_MOOD] ?: return null
@@ -211,15 +268,138 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
         }
 
         private fun readLastPhotoTimestamp(context: Context): Long? {
+            return readLongPref(context, KEY_LAST_PHOTO_TIMESTAMP)
+        }
+
+        private fun readLatestPostTimestamp(context: Context): Long? {
+            val lastTs = readLongPref(context, KEY_LAST_TIMESTAMP)
+            val lastPhotoTs = readLongPref(context, KEY_LAST_PHOTO_TIMESTAMP)
+            return when {
+                lastTs != null && lastPhotoTs != null -> maxOf(lastTs, lastPhotoTs)
+                lastTs != null -> lastTs
+                else -> lastPhotoTs
+            }
+        }
+
+        private fun readNudgeIntervalMinutes(context: Context): Int {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val rawValue = prefs.all[KEY_LAST_PHOTO_TIMESTAMP] ?: return null
+            val rawValue = prefs.all[KEY_NUDGE_INTERVAL_MINUTES] ?: return DEFAULT_NUDGE_INTERVAL_MINUTES
             val parsed = when (rawValue) {
-                is Number -> rawValue.toLong()
-                is String -> rawValue.trim().toLongOrNull()
-                    ?: rawValue.trim().toDoubleOrNull()?.toLong()
+                is Number -> rawValue.toInt()
+                is String -> rawValue.trim().toIntOrNull()
                 else -> null
             }
-            return parsed?.takeIf { it > 0L }
+            return (parsed ?: DEFAULT_NUDGE_INTERVAL_MINUTES).coerceAtLeast(0)
+        }
+
+        private fun isPostNudgeActive(context: Context): Boolean {
+            val intervalMinutes = readNudgeIntervalMinutes(context)
+            if (intervalMinutes <= 0) return false
+            val lastTimestamp = readLatestPostTimestamp(context) ?: return true
+            val elapsedMillis = System.currentTimeMillis() - lastTimestamp
+            return elapsedMillis >= intervalMinutes * 60_000L
+        }
+
+        private fun readRoutineProgress(context: Context): Pair<Int, Int> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val savedDate = prefs.all[KEY_ROUTINE_DATE] as? String
+            val rawTotal = prefs.all[KEY_ROUTINE_TOTAL]
+            val total = when (rawTotal) {
+                is Number -> rawTotal.toInt()
+                is String -> rawTotal.trim().toIntOrNull()
+                else -> null
+            } ?: DEFAULT_ROUTINE_TOTAL
+
+            val todayKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            if (savedDate != todayKey) {
+                return 0 to total.coerceAtLeast(0)
+            }
+
+            val rawCompleted = prefs.all[KEY_ROUTINE_COMPLETED]
+            val completed = when (rawCompleted) {
+                is Number -> rawCompleted.toInt()
+                is String -> rawCompleted.trim().toIntOrNull()
+                else -> null
+            } ?: 0
+
+            val safeTotal = total.coerceAtLeast(0)
+            val safeCompleted = if (safeTotal > 0) completed.coerceIn(0, safeTotal) else 0
+            return safeCompleted to safeTotal
+        }
+
+        private fun scheduleNextNudgeRefresh(context: Context) {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+            val refreshIntent = Intent(context, PhotoMoodWidgetProvider::class.java).apply {
+                action = ACTION_REFRESH_WIDGET
+            }
+
+            val intervalMinutes = readNudgeIntervalMinutes(context)
+            val lastTimestamp = readLatestPostTimestamp(context)
+            val now = System.currentTimeMillis()
+
+            if (intervalMinutes <= 0 || lastTimestamp == null) {
+                cancelNudgeRefreshAlarm(context, alarmManager, refreshIntent)
+                return
+            }
+
+            val triggerAtMillis = lastTimestamp + intervalMinutes * 60_000L
+            if (triggerAtMillis <= now) {
+                cancelNudgeRefreshAlarm(context, alarmManager, refreshIntent)
+                return
+            }
+
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                REQUEST_CODE_NUDGE_REFRESH,
+                refreshIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            try {
+                val canExact = if (Build.VERSION.SDK_INT >= 31) {
+                    alarmManager.canScheduleExactAlarms()
+                } else {
+                    true
+                }
+                if (canExact) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.RTC,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                }
+            } catch (_: SecurityException) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC,
+                    triggerAtMillis,
+                    pendingIntent
+                )
+            } catch (_: Exception) {
+                // Ignore alarm scheduling failure on restricted OEM devices
+            }
+        }
+
+        private fun cancelNudgeRefreshAlarm(
+            context: Context,
+            alarmManager: AlarmManager,
+            refreshIntent: Intent
+        ) {
+            val existing = PendingIntent.getBroadcast(
+                context,
+                REQUEST_CODE_NUDGE_REFRESH,
+                refreshIntent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (existing != null) {
+                alarmManager.cancel(existing)
+                existing.cancel()
+            }
         }
 
         private fun decodePhotoBitmap(rawData: String?): Bitmap? {
@@ -332,7 +512,83 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             return bitmap
         }
 
-        private fun createAddButtonBitmap(context: Context): Bitmap {
+        private fun createRoutineProgressBitmap(
+            context: Context,
+            completed: Int,
+            total: Int
+        ): Bitmap {
+            val density = context.resources.displayMetrics.density
+            val sizePx = (40f * density).toInt().coerceAtLeast(64)
+            val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+
+            val center = sizePx / 2f
+            val outerRadius = sizePx * 0.46f
+            val safeTotal = total.coerceAtLeast(0)
+            val safeCompleted = if (safeTotal > 0) completed.coerceIn(0, safeTotal) else 0
+            val progress = if (safeTotal > 0) safeCompleted.toFloat() / safeTotal.toFloat() else 0f
+            val isAllDone = safeTotal > 0 && safeCompleted >= safeTotal
+
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.FILL
+                color = if (isAllDone) {
+                    Color.argb(215, 20, 32, 26)
+                } else {
+                    Color.argb(204, 18, 18, 22)
+                }
+            }
+            canvas.drawCircle(center, center, outerRadius, bgPaint)
+
+            val strokeWidth = 2.6f * density
+            val ringRadius = outerRadius - strokeWidth * 1.15f
+            val ringOval = RectF(
+                center - ringRadius,
+                center - ringRadius,
+                center + ringRadius,
+                center + ringRadius
+            )
+
+            val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                this.strokeWidth = strokeWidth
+                color = Color.argb(52, 255, 255, 255)
+            }
+            canvas.drawOval(ringOval, trackPaint)
+
+            val routineAccent = Color.parseColor("#68B088")
+            if (progress > 0f) {
+                val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeCap = Paint.Cap.ROUND
+                    this.strokeWidth = strokeWidth
+                    color = routineAccent
+                }
+                val sweepAngle = (progress * 360f).coerceIn(0f, 360f)
+                canvas.drawArc(ringOval, -90f, sweepAngle, false, progressPaint)
+            }
+
+            val checkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                this.strokeWidth = 1.9f * density
+                color = when {
+                    isAllDone -> routineAccent
+                    safeCompleted > 0 -> Color.argb(220, 255, 255, 255)
+                    else -> Color.argb(105, 255, 255, 255)
+                }
+            }
+            val checkPath = Path().apply {
+                moveTo(center - sizePx * 0.105f, center + sizePx * 0.005f)
+                lineTo(center - sizePx * 0.025f, center + sizePx * 0.085f)
+                lineTo(center + sizePx * 0.120f, center - sizePx * 0.075f)
+            }
+            canvas.drawPath(checkPath, checkPaint)
+
+            return bitmap
+        }
+
+        private fun createAddButtonBitmap(context: Context, isNudgeActive: Boolean): Bitmap {
             val density = context.resources.displayMetrics.density
             val sizePx = (40f * density).toInt().coerceAtLeast(64)
             val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
@@ -341,28 +597,64 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             val center = sizePx / 2f
             val radius = sizePx * 0.46f
 
-            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                color = Color.argb(204, 18, 18, 22)
-            }
-            canvas.drawCircle(center, center, radius, bgPaint)
+            if (isNudgeActive) {
+                val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    color = Color.argb(58, 229, 169, 60)
+                }
+                canvas.drawCircle(center, center, sizePx * 0.49f, haloPaint)
 
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = 1.2f * density
-                color = Color.argb(56, 255, 255, 255)
-            }
-            canvas.drawCircle(center, center, radius - borderPaint.strokeWidth / 2f, borderPaint)
+                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    color = Color.argb(232, 229, 169, 60)
+                }
+                canvas.drawCircle(center, center, radius * 0.96f, bgPaint)
 
-            val plusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeCap = Paint.Cap.ROUND
-                strokeWidth = 2.2f * density
-                color = Color.WHITE
+                val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1.2f * density
+                    color = Color.argb(150, 255, 238, 195)
+                }
+                canvas.drawCircle(
+                    center,
+                    center,
+                    radius * 0.96f - borderPaint.strokeWidth / 2f,
+                    borderPaint
+                )
+
+                val plusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeCap = Paint.Cap.ROUND
+                    strokeWidth = 2.3f * density
+                    color = Color.parseColor("#141417")
+                }
+                val arm = sizePx * 0.19f
+                canvas.drawLine(center - arm, center, center + arm, center, plusPaint)
+                canvas.drawLine(center, center - arm, center, center + arm, plusPaint)
+            } else {
+                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    color = Color.argb(204, 18, 18, 22)
+                }
+                canvas.drawCircle(center, center, radius, bgPaint)
+
+                val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = 1.2f * density
+                    color = Color.argb(56, 255, 255, 255)
+                }
+                canvas.drawCircle(center, center, radius - borderPaint.strokeWidth / 2f, borderPaint)
+
+                val plusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeCap = Paint.Cap.ROUND
+                    strokeWidth = 2.2f * density
+                    color = Color.WHITE
+                }
+                val arm = sizePx * 0.20f
+                canvas.drawLine(center - arm, center, center + arm, center, plusPaint)
+                canvas.drawLine(center, center - arm, center, center + arm, plusPaint)
             }
-            val arm = sizePx * 0.20f
-            canvas.drawLine(center - arm, center, center + arm, center, plusPaint)
-            canvas.drawLine(center, center - arm, center, center + arm, plusPaint)
 
             return bitmap
         }

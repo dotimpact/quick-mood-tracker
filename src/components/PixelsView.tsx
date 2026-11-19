@@ -95,6 +95,8 @@ export const PixelsView: React.FC<PixelsViewProps> = ({
     return result;
   }, [sortedLogs]);
 
+  const todayKey = getCalendarDayKey(new Date());
+
   const last14Days = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -106,7 +108,7 @@ export const PixelsView: React.FC<PixelsViewProps> = ({
         label: `${d.getMonth() + 1}/${d.getDate()}`,
       };
     });
-  }, []);
+  }, [todayKey]);
 
   const activeRoutines = useMemo(
     () =>

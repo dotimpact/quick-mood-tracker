@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   AppSettings,
   AppTab,
@@ -10,7 +10,6 @@ import {
 import { MOOD_PRESETS } from './constants/presets';
 import {
   deleteLog,
-  deleteRoutine,
   getAllLogs,
   getAllRoutineLogs,
   getAllRoutines,
@@ -24,6 +23,7 @@ import {
   saveSettings,
   seedInitialLogsIfEmpty,
   seedInitialRoutinesIfEmpty,
+  syncRoutineProgressToWidgetStorage,
 } from './services/storage';
 import { startNotificationScheduler } from './services/notification';
 import { MinimalIcon } from './components/MinimalIcon';
@@ -52,6 +52,35 @@ export const App: React.FC = () => {
 
   // Settings Modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  const lastTodayKeyRef = useRef<string>(getCalendarDayKey(new Date()));
+
+  useEffect(() => {
+    const checkTimeAndDateRollover = () => {
+      const now = new Date();
+      setNowTick(now.getTime());
+      const currentTodayKey = getCalendarDayKey(now);
+      if (currentTodayKey !== lastTodayKeyRef.current) {
+        lastTodayKeyRef.current = currentTodayKey;
+        setSelectedRoutineDateKey(currentTodayKey);
+        void syncRoutineProgressToWidgetStorage();
+      }
+    };
+
+    const timer = window.setInterval(checkTimeAndDateRollover, 30_000);
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkTimeAndDateRollover();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', checkTimeAndDateRollover);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', checkTimeAndDateRollover);
+    };
+  }, []);
 
   // Load initial logs, routines, routineLogs & check deep-link query params from Android Widget
   useEffect(() => {
@@ -63,11 +92,19 @@ export const App: React.FC = () => {
       setLogs(loadedLogs);
       setRoutines(loadedRoutines);
       setRoutineLogs(loadedRoutineLogs);
+      void syncRoutineProgressToWidgetStorage(loadedRoutines, loadedRoutineLogs);
     });
 
     const params = new URLSearchParams(window.location.search);
     const moodParam = Number(params.get('mood'));
     const openSheetParam = params.get('openSheet');
+    const tabParam = params.get('tab');
+    if (tabParam === 'routines' || tabParam === 'timeline' || tabParam === 'pixels') {
+      setActiveTab(tabParam);
+      if (tabParam === 'routines') {
+        setSelectedRoutineDateKey(getCalendarDayKey(new Date()));
+      }
+    }
     if (moodParam >= 1 && moodParam <= 5) {
       setSheetInitialMood(moodParam as MoodLevel);
       setIsSheetOpen(true);
@@ -75,10 +112,23 @@ export const App: React.FC = () => {
     } else if (openSheetParam === '1') {
       setIsSheetOpen(true);
       window.history.replaceState({}, '', window.location.pathname);
+    } else if (tabParam) {
+      window.history.replaceState({}, '', window.location.pathname);
     }
 
     const handleNativeWidgetEvent = (e: Event) => {
-      const custom = e as CustomEvent<{ mood?: MoodLevel; openSheet?: boolean }>;
+      const custom = e as CustomEvent<{
+        mood?: MoodLevel;
+        openSheet?: boolean;
+        tab?: AppTab;
+      }>;
+      const tab = custom.detail?.tab;
+      if (tab === 'routines' || tab === 'timeline' || tab === 'pixels') {
+        setActiveTab(tab);
+        if (tab === 'routines') {
+          setSelectedRoutineDateKey(getCalendarDayKey(new Date()));
+        }
+      }
       const m = custom.detail?.mood;
       if (m && m >= 1 && m <= 5) {
         setEditingLog(null);
@@ -142,6 +192,7 @@ export const App: React.FC = () => {
     await saveLog(newLog);
     const refreshed = await getAllLogs();
     setLogs(refreshed);
+    setNowTick(Date.now());
     setIsSheetOpen(false);
     setEditingLog(null);
     setSheetInitialImage(undefined);
@@ -158,6 +209,7 @@ export const App: React.FC = () => {
     await deleteLog(id);
     const refreshed = await getAllLogs();
     setLogs(refreshed);
+    setNowTick(Date.now());
     setIsSheetOpen(false);
     setEditingLog(null);
     setSheetInitialImage(undefined);
@@ -167,6 +219,7 @@ export const App: React.FC = () => {
     const id = `${dateKey}_${routineId}`;
     const existing = routineLogs.find((r) => r.id === id);
     const nextCompleted = !existing?.completed;
+    const now = Date.now();
     const entry: RoutineDayLog = {
       id,
       dateKey,
@@ -174,7 +227,8 @@ export const App: React.FC = () => {
       completed: nextCompleted,
       count: nextCompleted ? 1 : 0,
       comment: existing?.comment,
-      updatedAt: Date.now(),
+      completedAt: nextCompleted ? now : undefined,
+      updatedAt: now,
     };
     await saveRoutineDayLog(entry);
     const refreshed = await getAllRoutineLogs();
@@ -195,6 +249,7 @@ export const App: React.FC = () => {
       completed: existing ? existing.completed : false,
       count: existing?.count ?? (existing?.completed ? 1 : 0),
       comment,
+      completedAt: existing?.completedAt,
       updatedAt: Date.now(),
     };
     await saveRoutineDayLog(entry);
@@ -209,6 +264,7 @@ export const App: React.FC = () => {
       title,
       icon,
       order: maxOrder + 1,
+      createdAt: Date.now(),
       targetCount: 1,
     };
     await saveRoutine(item);
@@ -223,13 +279,21 @@ export const App: React.FC = () => {
   };
 
   const handleReorderRoutines = async (items: RoutineItem[]) => {
-    await saveAllRoutines(items);
+    const updatedIds = new Set(items.map((item) => item.id));
+    const preservedArchived = routines.filter((r) => r.archived && !updatedIds.has(r.id));
+    await saveAllRoutines([...items, ...preservedArchived]);
     const refreshed = await getAllRoutines();
     setRoutines(refreshed);
   };
 
   const handleDeleteRoutine = async (id: string) => {
-    await deleteRoutine(id);
+    const target = routines.find((r) => r.id === id);
+    if (!target) return;
+    await saveRoutine({
+      ...target,
+      archived: true,
+      archivedAt: Date.now(),
+    });
     const refreshed = await getAllRoutines();
     setRoutines(refreshed);
   };
@@ -272,6 +336,12 @@ export const App: React.FC = () => {
   const latestMood: MoodLevel = logs[0]?.mood || 4;
   const activeMoodPreset = MOOD_PRESETS[latestMood];
   const activeColor = activeMoodPreset.color;
+
+  const latestTimestamp = logs[0]?.timestamp;
+  const nudgeIntervalMs = Math.max(1, settings.nudgeIntervalMinutes || 60) * 60_000;
+  const isPostNudgeActive =
+    settings.nudgeEnabled !== false &&
+    (!latestTimestamp || nowTick - latestTimestamp >= nudgeIntervalMs);
 
   return (
     <div className="min-h-screen bg-[#111214] text-zinc-200 flex flex-col items-center relative pb-[calc(env(safe-area-inset-bottom,0px)+5.5rem)]">
@@ -349,7 +419,12 @@ export const App: React.FC = () => {
           {/* 2. Routines */}
           <button
             type="button"
-            onClick={() => setActiveTab('routines')}
+            onClick={() => {
+              const todayKey = getCalendarDayKey(new Date());
+              lastTodayKeyRef.current = todayKey;
+              setSelectedRoutineDateKey(todayKey);
+              setActiveTab('routines');
+            }}
             aria-label="Routines"
             aria-current={activeTab === 'routines' ? 'page' : undefined}
             className={`relative w-12 h-11 rounded-xl flex flex-col items-center justify-center transition-colors active:scale-95 ${
@@ -372,14 +447,29 @@ export const App: React.FC = () => {
             type="button"
             onClick={() => handleOpenQuickEntry(latestMood)}
             aria-label="New Mood Entry"
-            className="w-12 h-11 rounded-2xl border flex items-center justify-center transition-transform active:scale-95"
-            style={{
-              borderColor: activeMoodPreset.borderColor,
-              backgroundColor: activeMoodPreset.bgSoft,
-              color: activeColor,
-            }}
+            data-nudge-active={isPostNudgeActive ? 'true' : 'false'}
+            className="w-12 h-11 rounded-2xl border flex items-center justify-center transition-all duration-300 active:scale-95"
+            style={
+              isPostNudgeActive
+                ? {
+                    borderColor: 'rgba(255, 238, 195, 0.55)',
+                    backgroundColor: '#E5A93C',
+                    color: '#141417',
+                    boxShadow: '0 0 14px rgba(229, 169, 60, 0.28)',
+                  }
+                : {
+                    borderColor: activeMoodPreset.borderColor,
+                    backgroundColor: activeMoodPreset.bgSoft,
+                    color: activeColor,
+                  }
+            }
           >
-            <MinimalIcon name="Plus" size={20} strokeWidth={2.1} color={activeColor} />
+            <MinimalIcon
+              name="Plus"
+              size={20}
+              strokeWidth={2.2}
+              color={isPostNudgeActive ? '#141417' : activeColor}
+            />
           </button>
 
           {/* 4. Pixels */}

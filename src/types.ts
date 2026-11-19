@@ -36,6 +36,8 @@ export interface NotificationSlot {
 export interface AppSettings {
   notificationsEnabled: boolean;
   slots: NotificationSlot[];
+  nudgeEnabled: boolean;
+  nudgeIntervalMinutes: number; // Default 60 (1 hour)
 }
 
 export interface RoutineItem {
@@ -44,6 +46,8 @@ export interface RoutineItem {
   icon: string;
   order: number;
   archived?: boolean;
+  createdAt?: number;
+  archivedAt?: number;
   targetCount?: number; // Reserved for multi-check routines (default 1)
 }
 
@@ -54,6 +58,7 @@ export interface RoutineDayLog {
   completed: boolean;
   count?: number;       // Reserved for multi-check routines (default completed ? 1 : 0)
   comment?: string;     // Per-completion daily note/comment
+  completedAt?: number; // Epoch ms when transitioned false -> true
   updatedAt: number;
 }
 

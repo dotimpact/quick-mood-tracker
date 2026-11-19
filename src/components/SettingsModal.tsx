@@ -140,6 +140,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTestFeedback(ok ? 'sent' : 'denied');
   };
 
+  const nudgeEnabled = settings.nudgeEnabled !== false;
+  const nudgeIntervalMinutes = settings.nudgeIntervalMinutes || 60;
+
+  const handleToggleNudge = () => {
+    onUpdateSettings({
+      ...settings,
+      nudgeEnabled: !nudgeEnabled,
+    });
+  };
+
+  const handleSelectNudgeInterval = (minutes: number) => {
+    const clamped = Math.min(720, Math.max(15, Math.round(minutes)));
+    onUpdateSettings({
+      ...settings,
+      nudgeEnabled: true,
+      nudgeIntervalMinutes: clamped,
+    });
+  };
+
+  const NUDGE_PRESETS = [
+    { minutes: 30, label: '30分' },
+    { minutes: 60, label: '1時間' },
+    { minutes: 120, label: '2時間' },
+    { minutes: 180, label: '3時間' },
+    { minutes: 360, label: '6時間' },
+  ];
+
+  const formatIntervalLabel = (minutes: number): string => {
+    if (minutes < 60) return `${minutes}分`;
+    const hours = Math.floor(minutes / 60);
+    const rem = minutes % 60;
+    return rem === 0 ? `${hours}時間` : `${hours}時間${rem}分`;
+  };
+
   return (
     <div
       role="dialog"
@@ -150,7 +184,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-t-3xl border border-zinc-800/90 bg-zinc-950 p-5 pb-[calc(env(safe-area-inset-bottom,0px)+1.75rem)] shadow-2xl sm:rounded-3xl sm:pb-5"
+        className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-t-3xl border border-zinc-800/90 bg-zinc-950 p-5 pb-[calc(env(safe-area-inset-bottom,0px)+1.75rem)] shadow-2xl sm:rounded-3xl sm:pb-5"
       >
         {/* Header */}
         <div className="mb-5 flex items-center justify-between">
@@ -273,6 +307,85 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   : 'テスト通知を送信'}
               </span>
             </button>
+          </div>
+
+          {/* Post Interval Gentle Nudge (Widget & Add Button Color) */}
+          <div className="rounded-2xl border border-zinc-900 bg-zinc-900/40 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <MinimalIcon
+                  name="Clock"
+                  size={18}
+                  strokeWidth={1.85}
+                  className={nudgeEnabled ? 'text-[#E5A93C]' : 'text-zinc-500'}
+                />
+                <div className="min-w-0">
+                  <div className="text-sm tracking-wide text-zinc-200">
+                    未投稿の気づきサイン
+                  </div>
+                  <div className="text-[11px] text-zinc-500 truncate">
+                    最後の投稿から一定時間経過で追加ボタンを色変化
+                  </div>
+                </div>
+              </div>
+              <ToggleSwitch
+                checked={nudgeEnabled}
+                onChange={handleToggleNudge}
+                ariaLabel="Toggle post elapsed nudge"
+              />
+            </div>
+
+            {nudgeEnabled && (
+              <div className="space-y-2.5 pt-0.5">
+                <div className="grid grid-cols-5 gap-1.5">
+                  {NUDGE_PRESETS.map((preset) => {
+                    const isSelected = nudgeIntervalMinutes === preset.minutes;
+                    return (
+                      <button
+                        key={preset.minutes}
+                        type="button"
+                        onClick={() => handleSelectNudgeInterval(preset.minutes)}
+                        aria-pressed={isSelected}
+                        className={`min-h-[38px] rounded-xl border text-xs font-medium transition-colors active:scale-95 ${
+                          isSelected
+                            ? 'border-[#E5A93C]/70 bg-[#E5A93C]/20 text-[#E5A93C]'
+                            : 'border-zinc-800/80 bg-zinc-950/70 text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3 py-2">
+                  <span className="text-xs text-zinc-400">経過時間</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={nudgeIntervalMinutes <= 15}
+                      onClick={() => handleSelectNudgeInterval(nudgeIntervalMinutes - 15)}
+                      aria-label="Decrease nudge interval"
+                      className="h-7 w-7 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-mono text-zinc-300 hover:text-white disabled:opacity-30 active:scale-95"
+                    >
+                      -
+                    </button>
+                    <span className="min-w-[68px] text-center font-mono text-xs text-[#E5A93C]">
+                      {formatIntervalLabel(nudgeIntervalMinutes)}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={nudgeIntervalMinutes >= 720}
+                      onClick={() => handleSelectNudgeInterval(nudgeIntervalMinutes + 15)}
+                      aria-label="Increase nudge interval"
+                      className="h-7 w-7 rounded-lg border border-zinc-800 bg-zinc-900 text-xs font-mono text-zinc-300 hover:text-white disabled:opacity-30 active:scale-95"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Import & Export Buttons */}

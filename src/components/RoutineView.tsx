@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { RoutineDayLog, RoutineItem } from '../types';
 import { ROUTINE_ICON_OPTIONS } from '../constants/presets';
-import { getCalendarDayKey } from '../services/storage';
+import {
+  getCalendarDayKey,
+  getRoutineDayProgress,
+  isRoutineActiveOnDate,
+} from '../services/storage';
 import { MinimalIcon } from './MinimalIcon';
 
 export interface RoutineViewProps {
@@ -60,7 +64,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
   const [draftTitles, setDraftTitles] = useState<Record<string, string>>({});
   const [openIconPickerId, setOpenIconPickerId] = useState<string | null>(null);
 
-  const todayKey = useMemo(() => getCalendarDayKey(new Date()), []);
+  const todayKey = getCalendarDayKey(new Date());
   const isToday = selectedDateKey >= todayKey;
 
   const activeRoutines = useMemo(
@@ -81,15 +85,22 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
     return map;
   }, [routineLogs, selectedDateKey]);
 
-  const completedCount = useMemo(() => {
-    let count = 0;
-    for (const r of activeRoutines) {
-      if (dayLogMap.get(r.id)?.completed) {
-        count += 1;
-      }
-    }
-    return count;
-  }, [activeRoutines, dayLogMap]);
+  const dayProgress = useMemo(
+    () => getRoutineDayProgress(selectedDateKey, routines, routineLogs),
+    [selectedDateKey, routines, routineLogs]
+  );
+
+  const visibleRoutinesForDate = useMemo(
+    () =>
+      routines
+        .filter((r) => {
+          if (isRoutineActiveOnDate(r, selectedDateKey)) return true;
+          const log = dayLogMap.get(r.id);
+          return Boolean(log?.completed || log?.comment?.trim());
+        })
+        .sort((a, b) => a.order - b.order),
+    [routines, selectedDateKey, dayLogMap]
+  );
 
   const openCommentEditor = (routineId: string) => {
     const existingComment = dayLogMap.get(routineId)?.comment || '';
@@ -186,7 +197,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
               className="font-mono"
               style={{ color: accentColor }}
             >
-              {completedCount}/{activeRoutines.length}
+              {dayProgress.completed}/{dayProgress.total}
             </span>
           </button>
 
@@ -364,7 +375,8 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteRoutine(routine.id)}
-                      aria-label="Delete routine"
+                      aria-label="Archive routine"
+                      title="アーカイブ（履歴は保持）"
                       className="w-9 h-9 rounded-lg bg-[#111214] border border-zinc-800/80 flex items-center justify-center text-[#C97076] hover:bg-[#C97076]/10 active:scale-95 shrink-0"
                     >
                       <MinimalIcon name="Trash2" size={16} />
@@ -408,7 +420,7 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
       ) : (
         /* Normal Mode: Check + Comment */
         <div className="space-y-2.5">
-          {activeRoutines.map((routine) => {
+          {visibleRoutinesForDate.map((routine) => {
             const log = dayLogMap.get(routine.id);
             const completed = Boolean(log?.completed);
             const comment = log?.comment || '';
@@ -456,6 +468,12 @@ export const RoutineView: React.FC<RoutineViewProps> = ({
                     >
                       {routine.title}
                     </span>
+
+                    {routine.archived && (
+                      <span className="text-[10px] font-mono text-zinc-500 border border-zinc-800 rounded px-1.5 py-0.5 shrink-0">
+                        アーカイブ
+                      </span>
+                    )}
                   </button>
 
                   <button

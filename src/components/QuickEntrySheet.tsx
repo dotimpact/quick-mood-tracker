@@ -53,6 +53,41 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef<Record<SectionKey, HTMLDivElement | null>>({
+    weather: null,
+    sensations: null,
+    activities: null,
+    note: null,
+  });
+
+  const scrollSectionIntoView = (key: SectionKey) => {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        const container = scrollContainerRef.current;
+        const sectionEl = sectionRefs.current[key];
+        if (!container || !sectionEl) return;
+        const containerRect = container.getBoundingClientRect();
+        const sectionRect = sectionEl.getBoundingClientRect();
+        const overflowBottom = sectionRect.bottom - containerRect.bottom;
+        if (overflowBottom > 0) {
+          container.scrollBy({
+            top: overflowBottom + 16,
+            behavior: 'smooth',
+          });
+        }
+      }, 20);
+    });
+  };
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -80,6 +115,7 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
     if (!isOpen || !initialImageDataUrl) return;
     setImageDataUrl(initialImageDataUrl);
     setOpenSections((prev) => ({ ...prev, note: true }));
+    scrollSectionIntoView('note');
   }, [isOpen, initialImageDataUrl]);
 
   useEffect(() => {
@@ -105,7 +141,13 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   const trimmedNote = note.trim();
 
   const toggleSection = (key: SectionKey) => {
-    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+    setOpenSections((prev) => {
+      const willOpen = !prev[key];
+      if (willOpen) {
+        scrollSectionIntoView(key);
+      }
+      return { ...prev, [key]: willOpen };
+    });
   };
 
   const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -164,7 +206,7 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
             }
           : undefined
       }
-      className={`min-h-[64px] py-3 px-1.5 rounded-2xl border flex flex-col items-center justify-center gap-1.5 transition-all duration-150 active:scale-95 focus:outline-none ${
+      className={`min-h-[64px] py-3 px-1.5 rounded-2xl border flex flex-col items-center justify-center gap-1.5 transition-all duration-150 active:scale-95 focus:outline-none touch-pan-y ${
         isSelected
           ? 'font-medium'
           : 'border-zinc-800/40 bg-zinc-900/30 text-zinc-400 hover:bg-zinc-800/50'
@@ -183,12 +225,17 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   ) => {
     const isExpanded = openSections[key];
     return (
-      <div className="border-t border-zinc-800/50">
+      <div
+        ref={(el) => {
+          sectionRefs.current[key] = el;
+        }}
+        className="border-t border-zinc-800/50"
+      >
         <button
           type="button"
           onClick={() => toggleSection(key)}
           aria-expanded={isExpanded}
-          className="w-full min-h-[54px] py-3.5 px-2 -mx-2 rounded-xl flex items-center justify-between gap-3 text-left focus:outline-none active:bg-zinc-800/40 transition-colors group"
+          className="w-full min-h-[54px] py-3.5 px-2 rounded-xl flex items-center justify-between gap-3 text-left focus:outline-none active:bg-zinc-800/40 transition-colors group touch-pan-y"
         >
           <span className="text-sm font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors">
             {label}
@@ -213,13 +260,13 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] shadow-2xl flex flex-col max-h-[90vh]"
+        className="w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] shadow-2xl flex flex-col overflow-hidden max-h-[85vh] max-h-[85dvh]"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Subtle drag handle */}
@@ -271,7 +318,11 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
         </div>
 
         {/* 2. Collapsible Optional Sections */}
-        <div className="overflow-y-auto min-h-0 -mx-2 px-2">
+        <div
+          ref={scrollContainerRef}
+          style={{ WebkitOverflowScrolling: 'touch' }}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y -mx-2 px-2 pb-2"
+        >
           {renderAccordionSection(
             'sensations',
             '体感',

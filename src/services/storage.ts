@@ -16,6 +16,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     { id: 'noon', time: '13:00', enabled: false },
     { id: 'night', time: '21:30', enabled: true },
   ],
+  nudgeEnabled: true,
+  nudgeIntervalMinutes: 60,
 };
 
 export function getCalendarDayKey(date: Date): string {
@@ -23,6 +25,60 @@ export function getCalendarDayKey(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function getDayBounds(dateKey: string): { startMs: number; endMs: number } {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const start = new Date(year, (month || 1) - 1, day || 1, 0, 0, 0, 0);
+  const end = new Date(year, (month || 1) - 1, day || 1, 23, 59, 59, 999);
+  return { startMs: start.getTime(), endMs: end.getTime() };
+}
+
+export function isRoutineActiveOnDate(routine: RoutineItem, dateKey: string): boolean {
+  const { endMs } = getDayBounds(dateKey);
+  const createdOk = routine.createdAt === undefined || routine.createdAt <= endMs;
+  let archivedOk: boolean;
+  if (routine.archivedAt !== undefined) {
+    archivedOk = routine.archivedAt > endMs;
+  } else if (routine.archived === true) {
+    archivedOk = false;
+  } else {
+    archivedOk = true;
+  }
+  return createdOk && archivedOk;
+}
+
+export function getRoutineDayProgress(
+  dateKey: string,
+  routines: RoutineItem[],
+  routineLogs: RoutineDayLog[]
+): { completed: number; total: number } {
+  const routineById = new Map(routines.map((r) => [r.id, r]));
+  const completedIds = new Set<string>();
+  for (const entry of routineLogs) {
+    if (entry.dateKey === dateKey && entry.completed && routineById.has(entry.routineId)) {
+      completedIds.add(entry.routineId);
+    }
+  }
+
+  const denominatorIds = new Set<string>();
+  for (const routine of routines) {
+    if (isRoutineActiveOnDate(routine, dateKey)) {
+      denominatorIds.add(routine.id);
+    }
+  }
+  completedIds.forEach((id) => denominatorIds.add(id));
+
+  return {
+    completed: Math.min(denominatorIds.size, completedIds.size),
+    total: denominatorIds.size,
+  };
+}
+
+export function getRoutineEventTime(log: RoutineDayLog): number | null {
+  const rawTime = log.completed ? (log.completedAt ?? log.updatedAt) : log.updatedAt;
+  if (!rawTime || !Number.isFinite(rawTime)) return null;
+  return getCalendarDayKey(new Date(rawTime)) === log.dateKey ? rawTime : null;
 }
 
 function createSampleCafeSunsetSvg(): string {
@@ -71,6 +127,17 @@ function createSampleCafeSunsetSvg(): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+interface AndroidWidgetBridgeShape {
+  syncWidget?: (mood: number, ts: number, photo: string) => void;
+  syncRoutineWidget?: (dateKey: string, completed: number, total: number) => void;
+  syncWidgetNudge?: (intervalMinutes: number) => void;
+}
+
+function getWidgetBridge(): AndroidWidgetBridgeShape | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return (window as unknown as { AndroidBridge?: AndroidWidgetBridgeShape }).AndroidBridge;
+}
+
 function mirrorLogToWidgetStorage(log: MoodLog): void {
   localStorage.setItem('widget_last_mood', String(log.mood));
   localStorage.setItem('widget_last_timestamp', String(log.timestamp));
@@ -80,9 +147,66 @@ function mirrorLogToWidgetStorage(log: MoodLog): void {
     localStorage.setItem('widget_last_photo_timestamp', String(log.timestamp));
   }
   try {
-    const bridge = (window as unknown as { AndroidBridge?: { syncWidget: (mood: number, ts: number, photo: string) => void } }).AndroidBridge;
+    const bridge = getWidgetBridge();
     if (bridge && typeof bridge.syncWidget === 'function') {
       bridge.syncWidget(log.mood, log.timestamp, log.imageDataUrl || '');
+    }
+  } catch {
+    // Ignore when not in Android WebView
+  }
+}
+
+export async function syncLogsToWidgetStorage(providedLogs?: MoodLog[]): Promise<void> {
+  const logs = providedLogs ?? (await getAllLogs());
+  if (logs.length === 0) return;
+
+  const sorted = [...logs].sort((a, b) => b.timestamp - a.timestamp);
+  const latest = sorted[0];
+  const latestWithPhoto = sorted.find((l) => Boolean(l.imageDataUrl));
+
+  if (latestWithPhoto && latestWithPhoto.id !== latest.id) {
+    mirrorLogToWidgetStorage(latestWithPhoto);
+  }
+  if (latest) {
+    mirrorLogToWidgetStorage(latest);
+  }
+}
+
+export async function syncRoutineProgressToWidgetStorage(
+  providedRoutines?: RoutineItem[],
+  providedRoutineLogs?: RoutineDayLog[]
+): Promise<void> {
+  const [routines, routineLogs] = await Promise.all([
+    providedRoutines ? Promise.resolve(providedRoutines) : getAllRoutines(),
+    providedRoutineLogs ? Promise.resolve(providedRoutineLogs) : getAllRoutineLogs(),
+  ]);
+
+  const todayKey = getCalendarDayKey(new Date());
+  const { completed, total } = getRoutineDayProgress(todayKey, routines, routineLogs);
+
+  localStorage.setItem('widget_routine_date', todayKey);
+  localStorage.setItem('widget_routine_completed', String(completed));
+  localStorage.setItem('widget_routine_total', String(total));
+
+  try {
+    const bridge = getWidgetBridge();
+    if (bridge && typeof bridge.syncRoutineWidget === 'function') {
+      bridge.syncRoutineWidget(todayKey, completed, total);
+    }
+  } catch {
+    // Ignore when not in Android WebView
+  }
+}
+
+export function syncNudgeSettingsToWidgetStorage(settings: AppSettings): void {
+  const effectiveMinutes = settings.nudgeEnabled
+    ? Math.max(1, Math.round(settings.nudgeIntervalMinutes || 60))
+    : 0;
+  localStorage.setItem('widget_nudge_interval_minutes', String(effectiveMinutes));
+  try {
+    const bridge = getWidgetBridge();
+    if (bridge && typeof bridge.syncWidgetNudge === 'function') {
+      bridge.syncWidgetNudge(effectiveMinutes);
     }
   } catch {
     // Ignore when not in Android WebView
@@ -140,14 +264,13 @@ export async function saveLog(log: MoodLog): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-    // Also mirror latest mood & photo to SharedPreferences/localStorage bridge for Android Widget
-    mirrorLogToWidgetStorage(log);
+    await syncLogsToWidgetStorage();
   } catch {
     const existing = await getAllLogs();
     const filtered = existing.filter((i) => i.id !== log.id);
     const updated = [log, ...filtered].sort((a, b) => b.timestamp - a.timestamp);
     localStorage.setItem('fallback_mood_logs', JSON.stringify(updated));
-    mirrorLogToWidgetStorage(log);
+    await syncLogsToWidgetStorage(updated);
   }
 }
 
@@ -160,21 +283,19 @@ export async function deleteLog(id: string): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
+    await syncLogsToWidgetStorage();
   } catch {
     const existing = await getAllLogs();
-    localStorage.setItem(
-      'fallback_mood_logs',
-      JSON.stringify(existing.filter((i) => i.id !== id))
-    );
+    const updated = existing.filter((i) => i.id !== id);
+    localStorage.setItem('fallback_mood_logs', JSON.stringify(updated));
+    await syncLogsToWidgetStorage(updated);
   }
 }
 
 export async function seedInitialLogsIfEmpty(): Promise<MoodLog[]> {
   const existing = await getAllLogs();
   if (existing.length > 0) {
-    const latestWithPhoto = existing.find((l) => l.imageDataUrl);
-    if (latestWithPhoto) mirrorLogToWidgetStorage(latestWithPhoto);
-    if (existing[0]) mirrorLogToWidgetStorage(existing[0]);
+    await syncLogsToWidgetStorage(existing);
     return existing;
   }
 
@@ -210,10 +331,12 @@ export async function seedInitialLogsIfEmpty(): Promise<MoodLog[]> {
     },
   ];
 
-  for (const item of sampleLogs) {
+  for (const item of [...sampleLogs].reverse()) {
     await saveLog(item);
   }
-  return getAllLogs();
+  const all = await getAllLogs();
+  await syncLogsToWidgetStorage(all);
+  return all;
 }
 
 export async function getAllRoutines(): Promise<RoutineItem[]> {
@@ -252,6 +375,7 @@ export async function saveRoutine(item: RoutineItem): Promise<void> {
     const updated = [...filtered, item].sort((a, b) => a.order - b.order);
     localStorage.setItem('fallback_routines', JSON.stringify(updated));
   }
+  await syncRoutineProgressToWidgetStorage();
 }
 
 export async function saveAllRoutines(items: RoutineItem[]): Promise<void> {
@@ -271,6 +395,7 @@ export async function saveAllRoutines(items: RoutineItem[]): Promise<void> {
     const sorted = [...items].sort((a, b) => a.order - b.order);
     localStorage.setItem('fallback_routines', JSON.stringify(sorted));
   }
+  await syncRoutineProgressToWidgetStorage(items);
 }
 
 export async function deleteRoutine(id: string): Promise<void> {
@@ -289,11 +414,13 @@ export async function deleteRoutine(id: string): Promise<void> {
       JSON.stringify(existing.filter((i) => i.id !== id))
     );
   }
+  await syncRoutineProgressToWidgetStorage();
 }
 
 export async function seedInitialRoutinesIfEmpty(): Promise<RoutineItem[]> {
   const existing = await getAllRoutines();
   if (existing.length > 0) {
+    await syncRoutineProgressToWidgetStorage(existing);
     return existing;
   }
   await saveAllRoutines(DEFAULT_ROUTINES);
@@ -333,6 +460,7 @@ export async function saveRoutineDayLog(entry: RoutineDayLog): Promise<void> {
     const filtered = existing.filter((i) => i.id !== entry.id);
     localStorage.setItem('fallback_routine_logs', JSON.stringify([...filtered, entry]));
   }
+  await syncRoutineProgressToWidgetStorage();
 }
 
 function mapMoodistoryEventsAndNotes(
@@ -419,6 +547,8 @@ export async function importMoodistoryCsvOrJson(rawContent: string): Promise<num
               icon: typeof r.icon === 'string' ? r.icon : 'Circle',
               order: typeof r.order === 'number' ? r.order : 0,
               archived: Boolean(r.archived),
+              createdAt: typeof r.createdAt === 'number' ? r.createdAt : undefined,
+              archivedAt: typeof r.archivedAt === 'number' ? r.archivedAt : undefined,
               targetCount: typeof r.targetCount === 'number' ? r.targetCount : 1,
             });
           }
@@ -434,6 +564,7 @@ export async function importMoodistoryCsvOrJson(rawContent: string): Promise<num
               completed: Boolean(rl.completed),
               count: typeof rl.count === 'number' ? rl.count : rl.completed ? 1 : 0,
               comment: typeof rl.comment === 'string' ? rl.comment : undefined,
+              completedAt: typeof rl.completedAt === 'number' ? rl.completedAt : undefined,
               updatedAt: typeof rl.updatedAt === 'number' ? rl.updatedAt : Date.now(),
             });
           }
@@ -534,8 +665,25 @@ export async function importMoodistoryCsvOrJson(rawContent: string): Promise<num
 export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (!raw) {
+      syncNudgeSettingsToWidgetStorage(DEFAULT_SETTINGS);
+      return DEFAULT_SETTINGS;
+    }
+    const parsed = JSON.parse(raw);
+    const merged: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      nudgeEnabled:
+        typeof parsed.nudgeEnabled === 'boolean'
+          ? parsed.nudgeEnabled
+          : DEFAULT_SETTINGS.nudgeEnabled,
+      nudgeIntervalMinutes:
+        typeof parsed.nudgeIntervalMinutes === 'number' && parsed.nudgeIntervalMinutes > 0
+          ? parsed.nudgeIntervalMinutes
+          : DEFAULT_SETTINGS.nudgeIntervalMinutes,
+    };
+    syncNudgeSettingsToWidgetStorage(merged);
+    return merged;
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -544,4 +692,5 @@ export function loadSettings(): AppSettings {
 export function saveSettings(settings: AppSettings): void {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   syncNativeNotifications(settings);
+  syncNudgeSettingsToWidgetStorage(settings);
 }

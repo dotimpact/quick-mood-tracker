@@ -63,6 +63,7 @@
             android:label="Mood Photo">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.minimal.moodtracker.ACTION_REFRESH_PHOTO_WIDGET" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

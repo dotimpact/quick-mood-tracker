@@ -45,7 +45,8 @@ class MainActivity : Activity() {
     private data class QuickEntryRequest(
         val mood: Int?,
         val openSheet: Boolean,
-        val launchCamera: Boolean = false
+        val launchCamera: Boolean = false,
+        val tab: String? = null
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -166,10 +167,11 @@ class MainActivity : Activity() {
         val initialReq = extractQuickEntryRequest(intent)
         val baseUrl = "file:///android_asset/www/index.html"
         val startUrl = if (initialReq != null) {
-            if (initialReq.mood != null) {
-                "$baseUrl?mood=${initialReq.mood}&openSheet=1"
-            } else {
-                "$baseUrl?openSheet=1"
+            when {
+                initialReq.mood != null -> "$baseUrl?mood=${initialReq.mood}&openSheet=1"
+                initialReq.tab != null && !initialReq.openSheet -> "$baseUrl?tab=${initialReq.tab}"
+                initialReq.openSheet -> "$baseUrl?openSheet=1"
+                else -> baseUrl
             }
         } else {
             baseUrl
@@ -236,11 +238,14 @@ class MainActivity : Activity() {
             val openSheet = openSheetParam == "1" || openSheetParam == "true"
             val cameraParam = data.getQueryParameter("camera")?.lowercase()
             val launchCamera = cameraParam == "1" || cameraParam == "true"
-            if (mood != null || openSheet || launchCamera) {
+            val tabParam = data.getQueryParameter("tab")?.lowercase()
+                ?.takeIf { it == "routines" || it == "timeline" || it == "pixels" }
+            if (mood != null || openSheet || launchCamera || tabParam != null) {
                 return QuickEntryRequest(
                     mood = mood,
-                    openSheet = true,
-                    launchCamera = launchCamera
+                    openSheet = mood != null || openSheet || launchCamera,
+                    launchCamera = launchCamera,
+                    tab = tabParam
                 )
             }
         }
@@ -249,11 +254,15 @@ class MainActivity : Activity() {
             .takeIf { it in 1..5 }
         val extraOpenSheet = intent.getBooleanExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_SHEET, false)
         val extraLaunchCamera = intent.getBooleanExtra(PhotoMoodWidgetProvider.EXTRA_LAUNCH_CAMERA, false)
-        if (extraMood != null || extraOpenSheet || extraLaunchCamera) {
+        val extraOpenTab = intent.getStringExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_TAB)
+            ?.lowercase()
+            ?.takeIf { it == "routines" || it == "timeline" || it == "pixels" }
+        if (extraMood != null || extraOpenSheet || extraLaunchCamera || extraOpenTab != null) {
             return QuickEntryRequest(
                 mood = extraMood,
-                openSheet = true,
-                launchCamera = extraLaunchCamera
+                openSheet = extraMood != null || extraOpenSheet || extraLaunchCamera,
+                launchCamera = extraLaunchCamera,
+                tab = extraOpenTab
             )
         }
 
@@ -266,6 +275,7 @@ class MainActivity : Activity() {
         intent.removeExtra(QuickMoodWidgetProvider.EXTRA_MOOD_LEVEL)
         intent.removeExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_SHEET)
         intent.removeExtra(PhotoMoodWidgetProvider.EXTRA_LAUNCH_CAMERA)
+        intent.removeExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_TAB)
     }
 
     fun launchCameraCapture() {
@@ -391,16 +401,16 @@ class MainActivity : Activity() {
 
     private fun dispatchQuickEntryEvent(request: QuickEntryRequest) {
         val wv = webView ?: return
-        val detailJson = if (request.mood != null) {
-            "{ mood: ${request.mood}, openSheet: true }"
-        } else {
-            "{ openSheet: true }"
+        val detailObj = JSONObject().apply {
+            if (request.mood != null) put("mood", request.mood)
+            put("openSheet", request.openSheet)
+            if (request.tab != null) put("tab", request.tab)
         }
         val script = """
             (function() {
               var event = new CustomEvent('moodtracker:quick-entry', {
                 cancelable: true,
-                detail: $detailJson
+                detail: ${detailObj}
               });
               window.dispatchEvent(event);
             })();
@@ -488,6 +498,26 @@ class MainActivity : Activity() {
             editor.apply()
 
             QuickMoodWidgetProvider.updateAllWidgets(context)
+            PhotoMoodWidgetProvider.updateAllWidgets(context)
+        }
+
+        @JavascriptInterface
+        fun syncRoutineWidget(dateKey: String, completed: Int, total: Int) {
+            val prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("widget_routine_date", dateKey)
+                .putInt("widget_routine_completed", completed.coerceAtLeast(0))
+                .putInt("widget_routine_total", total.coerceAtLeast(0))
+                .apply()
+            PhotoMoodWidgetProvider.updateAllWidgets(context)
+        }
+
+        @JavascriptInterface
+        fun syncWidgetNudge(intervalMinutes: Int) {
+            val prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putInt("widget_nudge_interval_minutes", intervalMinutes.coerceAtLeast(0))
+                .apply()
             PhotoMoodWidgetProvider.updateAllWidgets(context)
         }
 

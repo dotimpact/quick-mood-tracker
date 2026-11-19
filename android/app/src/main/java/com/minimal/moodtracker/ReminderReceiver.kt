@@ -26,12 +26,14 @@ class ReminderReceiver : BroadcastReceiver() {
                 showNotification(context, isTest = false)
                 // Reschedule for the next occurrence (tomorrow)
                 scheduleAllReminders(context)
+                PhotoMoodWidgetProvider.updateAllWidgets(context)
             }
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_TIME_CHANGED,
             Intent.ACTION_TIMEZONE_CHANGED,
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 scheduleAllReminders(context)
+                PhotoMoodWidgetProvider.updateAllWidgets(context)
             }
         }
     }
