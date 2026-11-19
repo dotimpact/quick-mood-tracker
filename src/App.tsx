@@ -58,6 +58,7 @@ export const App: React.FC = () => {
   const [sheetInitialMood, setSheetInitialMood] = useState<MoodLevel>(4);
   const [sheetInitialImage, setSheetInitialImage] = useState<string | undefined>(undefined);
   const [editingLog, setEditingLog] = useState<MoodLog | null>(null);
+  const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
 
   // Settings Modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -320,6 +321,11 @@ export const App: React.FC = () => {
     setIsSheetOpen(false);
     setEditingLog(null);
     setSheetInitialImage(undefined);
+    setHighlightedLogId(newLog.id);
+    window.setTimeout(
+      () => setHighlightedLogId((current) => (current === newLog.id ? null : current)),
+      1500
+    );
 
     const affectedDates = [getCalendarDayKey(new Date(newLog.timestamp))];
     if (previousEditingLog) {
@@ -570,6 +576,7 @@ export const App: React.FC = () => {
             routines={routines}
             routineLogs={routineLogs}
             onSelectRoutineDate={handleOpenRoutineDate}
+            highlightedLogId={highlightedLogId}
           />
         )}
 

@@ -24,3 +24,28 @@
   background: rgba(113, 113, 122, 0.3);
   border-radius: 9999px;
 }
+
+@keyframes sheet-backdrop-in { from { opacity: 0; } }
+@keyframes sheet-backdrop-out { to { opacity: 0; } }
+@keyframes sheet-panel-in { from { transform: translateY(100%); } }
+@keyframes sheet-panel-out { to { transform: translateY(100%); } }
+@keyframes saved-glow {
+  0%, 35% { background-color: var(--glow-color); }
+  100% { background-color: transparent; }
+}
+
+.sheet-backdrop-in { animation: sheet-backdrop-in 240ms ease-out both; }
+.sheet-backdrop-out { animation: sheet-backdrop-out 200ms ease-in both; }
+.sheet-panel-in { animation: sheet-panel-in 280ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+.sheet-panel-out { animation: sheet-panel-out 200ms cubic-bezier(0.4, 0, 1, 1) both; }
+.saved-glow { animation: saved-glow 1400ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-backdrop-in,
+  .sheet-backdrop-out,
+  .sheet-panel-in,
+  .sheet-panel-out,
+  .saved-glow {
+    animation-duration: 1ms;
+  }
+}

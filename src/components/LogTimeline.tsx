@@ -163,6 +163,7 @@ export interface LogTimelineProps {
   routines?: RoutineItem[];
   routineLogs?: RoutineDayLog[];
   onSelectRoutineDate?: (dateKey: string) => void;
+  highlightedLogId?: string | null;
 }
 
 const WEATHER_MAP = new Map<string, IconPreset>(
@@ -193,6 +194,7 @@ export const LogTimeline: React.FC<LogTimelineProps> = ({
   routines = [],
   routineLogs = [],
   onSelectRoutineDate,
+  highlightedLogId,
 }) => {
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
@@ -440,7 +442,10 @@ export const LogTimeline: React.FC<LogTimelineProps> = ({
                             onEditLog(log);
                           }
                         }}
-                        className="group relative flex items-start gap-3.5 py-3 min-h-[52px] cursor-pointer rounded-xl transition-colors hover:bg-zinc-900/40 active:bg-zinc-900/60 px-2.5 -mx-2.5 focus:outline-none focus-visible:bg-zinc-900/50"
+                        style={{ '--glow-color': moodPreset.bgSoft } as React.CSSProperties}
+                        className={`group relative flex items-start gap-3.5 py-3 min-h-[52px] cursor-pointer rounded-xl transition-colors hover:bg-zinc-900/40 active:bg-zinc-900/60 px-2.5 -mx-2.5 focus:outline-none focus-visible:bg-zinc-900/50 ${
+                          log.id === highlightedLogId ? 'saved-glow' : ''
+                        }`}
                       >
                         {/* Mood Node on the Spine */}
                         <div

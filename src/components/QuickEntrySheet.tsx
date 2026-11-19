@@ -8,6 +8,7 @@ import {
   WEATHER_PRESETS,
 } from '../constants/presets';
 import { compressImageFile } from '../services/imageUtils';
+import { haptic } from '../services/haptics';
 import { MinimalIcon } from './MinimalIcon';
 
 export interface QuickEntrySheetProps {
@@ -50,6 +51,12 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   const [imageDataUrl, setImageDataUrl] = useState<string | undefined>(undefined);
   const [isCompressing, setIsCompressing] = useState(false);
   const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(INITIAL_OPEN_SECTIONS);
+  const [isMounted, setIsMounted] = useState(isOpen);
+  if (isOpen && !isMounted) setIsMounted(true);
+  const isClosing = isMounted && !isOpen;
+  const shownEditingLogRef = useRef(editingLog);
+  if (isOpen) shownEditingLogRef.current = editingLog;
+  const shownEditingLog = shownEditingLogRef.current;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -130,7 +137,7 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) {
+  if (!isMounted) {
     return null;
   }
 
@@ -176,6 +183,7 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   };
 
   const handleSubmit = () => {
+    haptic('confirm');
     onSave({
       ...(editingLog ? { id: editingLog.id, timestamp: editingLog.timestamp } : {}),
       mood,
@@ -260,13 +268,20 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm"
+      className={`fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-black/70 backdrop-blur-sm ${
+        isClosing ? 'sheet-backdrop-out pointer-events-none' : 'sheet-backdrop-in'
+      }`}
       onClick={onClose}
+      onAnimationEnd={(event) => {
+        if (isClosing && event.target === event.currentTarget) setIsMounted(false);
+      }}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] shadow-2xl flex flex-col overflow-hidden max-h-[85vh] max-h-[85dvh]"
+        className={`w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] shadow-2xl flex flex-col overflow-hidden max-h-[85vh] max-h-[85dvh] ${
+          isClosing ? 'sheet-panel-out' : 'sheet-panel-in'
+        }`}
         onClick={(event) => event.stopPropagation()}
       >
         {/* Subtle drag handle */}
@@ -283,7 +298,10 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
               <button
                 key={level}
                 type="button"
-                onClick={() => setMood(level)}
+                onClick={() => {
+                  if (level !== mood) haptic('tick');
+                  setMood(level);
+                }}
                 aria-label={preset.hint}
                 aria-pressed={isSelected}
                 className="flex-1 flex flex-col items-center gap-2 py-1 group focus:outline-none"
@@ -511,11 +529,11 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
 
         {/* 3. Always-Visible Bottom Action Bar */}
         <div className="border-t border-zinc-800/60 pt-3.5 mt-1 flex items-center justify-between gap-3 shrink-0">
-          {editingLog && onDelete && (
+          {shownEditingLog && onDelete && (
             <button
               type="button"
               onClick={() => {
-                onDelete(editingLog.id);
+                onDelete(shownEditingLog.id);
                 onClose();
               }}
               className="shrink-0 h-12 px-4 rounded-xl flex items-center gap-2 text-sm text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors active:scale-95"
