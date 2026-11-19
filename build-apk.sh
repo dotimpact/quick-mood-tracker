@@ -48,6 +48,7 @@ echo "3. Compiling R.java and Kotlin sources..."
   -d "$BUILD_DIR/classes" \
   "$MAIN_DIR/java/com/minimal/moodtracker/MainActivity.kt" \
   "$MAIN_DIR/java/com/minimal/moodtracker/CameraFileProvider.kt" \
+  "$MAIN_DIR/java/com/minimal/moodtracker/DailySyncManager.kt" \
   "$MAIN_DIR/java/com/minimal/moodtracker/QuickMoodWidgetProvider.kt" \
   "$MAIN_DIR/java/com/minimal/moodtracker/PhotoMoodWidgetProvider.kt" \
   "$MAIN_DIR/java/com/minimal/moodtracker/ReminderReceiver.kt"

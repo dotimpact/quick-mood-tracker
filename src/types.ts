@@ -38,6 +38,7 @@ export interface AppSettings {
   slots: NotificationSlot[];
   nudgeEnabled: boolean;
   nudgeIntervalMinutes: number; // Default 60 (1 hour)
+  dailySyncEnabled: boolean;
 }
 
 export interface RoutineItem {

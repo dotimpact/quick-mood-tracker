@@ -4,6 +4,7 @@ import {
   requestNotificationPermission,
   sendTestNotification,
 } from '../services/notification';
+import { NativeSyncStatus } from '../services/dailySync';
 import { MinimalIcon } from './MinimalIcon';
 
 export interface SettingsModalProps {
@@ -13,6 +14,12 @@ export interface SettingsModalProps {
   onClose: () => void;
   onExportJson: () => void;
   onImportFile?: (file: File) => Promise<number>;
+  syncStatus: NativeSyncStatus;
+  isSyncingAll: boolean;
+  syncProgressText: string | null;
+  onPickSyncFolder: () => void;
+  onClearSyncFolder: () => void;
+  onSyncAllDays: () => void;
 }
 
 interface ToggleSwitchProps {
@@ -53,6 +60,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onExportJson,
   onImportFile,
+  syncStatus,
+  isSyncingAll,
+  syncProgressText,
+  onPickSyncFolder,
+  onClearSyncFolder,
+  onSyncAllDays,
 }) => {
   const [testFeedback, setTestFeedback] = useState<'idle' | 'sent' | 'denied'>('idle');
   const [importStatus, setImportStatus] = useState<string | null>(null);
@@ -142,6 +155,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const nudgeEnabled = settings.nudgeEnabled !== false;
   const nudgeIntervalMinutes = settings.nudgeIntervalMinutes || 60;
+  const dailySyncEnabled = settings.dailySyncEnabled !== false;
+  const isSyncReady = syncStatus.supported && syncStatus.configured && syncStatus.hasPermission;
+
+  const formatLastSynced = (timestampMs: number): string => {
+    if (!timestampMs) return '';
+    try {
+      return new Date(timestampMs).toLocaleString('ja-JP', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
+  };
 
   const handleToggleNudge = () => {
     onUpdateSettings({
@@ -384,6 +413,120 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Daily Folder Sync (JSON + Images for Syncthing / FolderSync) */}
+          <div className="rounded-2xl border border-zinc-900 bg-zinc-900/40 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <MinimalIcon
+                  name={isSyncReady ? 'FolderOpen' : 'Folder'}
+                  size={18}
+                  strokeWidth={1.85}
+                  className={isSyncReady && dailySyncEnabled ? 'text-emerald-400' : 'text-zinc-500'}
+                />
+                <div className="min-w-0">
+                  <div className="text-sm tracking-wide text-zinc-200">
+                    日次ファイル同期
+                  </div>
+                  <div className="text-[11px] text-zinc-500 truncate">
+                    daily/YYYY-MM-DD.json と images/ へ自動保存
+                  </div>
+                </div>
+              </div>
+              {syncStatus.supported && (
+                <ToggleSwitch
+                  checked={dailySyncEnabled}
+                  onChange={() =>
+                    onUpdateSettings({
+                      ...settings,
+                      dailySyncEnabled: !dailySyncEnabled,
+                    })
+                  }
+                  ariaLabel="Toggle daily file sync"
+                />
+              )}
+            </div>
+
+            {syncStatus.supported ? (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-zinc-800/80 bg-zinc-950/70 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] text-zinc-500">出力先フォルダ</div>
+                    <div className="truncate font-mono text-xs text-zinc-200">
+                      {syncStatus.configured
+                        ? syncStatus.label || '選択済みフォルダ'
+                        : '同期フォルダ未選択'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={onPickSyncFolder}
+                      className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-zinc-800 active:scale-95"
+                    >
+                      {syncStatus.configured ? '変更' : 'フォルダを選択'}
+                    </button>
+                    {syncStatus.configured && (
+                      <button
+                        type="button"
+                        onClick={onClearSyncFolder}
+                        aria-label="Clear sync folder"
+                        className="rounded-xl border border-zinc-800/80 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-400 transition-colors hover:text-rose-400 active:scale-95"
+                      >
+                        解除
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {syncStatus.configured && !syncStatus.hasPermission && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                    フォルダへのアクセス権限が失われています。「変更」から再度フォルダを選択してください。
+                  </div>
+                )}
+
+                {isSyncReady && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={isSyncingAll}
+                      onClick={onSyncAllDays}
+                      className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 py-2 text-sm text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 disabled:opacity-50 active:scale-[0.99]"
+                    >
+                      <MinimalIcon
+                        name="RefreshCw"
+                        size={16}
+                        strokeWidth={1.85}
+                        className={isSyncingAll ? 'animate-spin text-emerald-400' : 'text-zinc-400'}
+                      />
+                      <span>{syncProgressText || '今すぐ全件同期'}</span>
+                    </button>
+
+                    {(syncStatus.lastSyncedAt > 0 || syncStatus.lastError) && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px]">
+                        {syncStatus.lastSyncedAt > 0 && (
+                          <span className="text-zinc-500 font-mono">
+                            最終同期: {formatLastSynced(syncStatus.lastSyncedAt)}
+                          </span>
+                        )}
+                        {syncStatus.lastError && (
+                          <span className="text-rose-400 truncate max-w-full">
+                            {syncStatus.lastError}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/50 px-3 py-2 text-xs leading-relaxed text-zinc-500">
+                Android アプリ版では、指定フォルダへ{' '}
+                <span className="font-mono text-zinc-400">daily/YYYY-MM-DD.json</span> と{' '}
+                <span className="font-mono text-zinc-400">images/</span> を自動保存し、Syncthing や FolderSync で同期できます。
               </div>
             )}
           </div>

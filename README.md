@@ -18,9 +18,10 @@
   - **`Mood Photo`（2×2 リサイズ対応）**：直近の写真付きログを背景に表示し、左上にムードカラー＆日時バッジ、右下に1シート記録を即起動する **`[＋]` クイック追加ボタン** を備えたフォトウィジェット。
   - **`Mood`（4×1 バー）**：5段階のムードアイコンが並び、タップしたムードが選択された状態で1シート記録を即起動するミニマルバーウィジェット。
   - **Nothing OS / Android 13+ テーマアイコン対応**：ベクターアダプティブアイコンに加え、`<monochrome>` レイヤーにも対応。
-- **🔔 リマインダー通知 & バックアップ / Moodistory インポート**
+- **🔔 リマインダー通知 & バックアップ / Moodistory インポート / 日次フォルダ同期**
   - 複数の時刻を指定できるリマインダー通知設定。
   - 完全ローカル保存（IndexedDB + Android `SharedPreferences` ブリッジ）でオフライン動作。
+  - Android SAF（Storage Access Framework）で指定フォルダへ `index.json` / `daily/YYYY-MM-DD.json` / `images/` を自動出力し、Syncthing や FolderSync 経由で外部連携・日次同期に対応。
   - JSON 形式でのバックアップ書き出し・読み込みに加え、**Moodistory のエクスポートデータ（CSV / JSON）のインポート** に対応。
 
 ---
@@ -74,6 +75,7 @@ adb install -r MoodTracker-debug.apk
 │       ├── AndroidManifest.xml
 │       ├── java/com/minimal/moodtracker/
 │       │   ├── MainActivity.kt             # WebView ホスト & ウィジェット同期ブリッジ
+│       │   ├── DailySyncManager.kt         # SAF 経由の日次 JSON & 画像フォルダ自動出力
 │       │   ├── PhotoMoodWidgetProvider.kt  # 2×2 フォト＋クイック追加ウィジェット
 │       │   └── QuickMoodWidgetProvider.kt  # 4×1 5段階ムードバーウィジェット
 │       └── res/                            # ウィジェットレイアウト・アダプティブアイコン定義
@@ -89,6 +91,7 @@ adb install -r MoodTracker-debug.apk
 │   │   └── presets.ts              # ムード5段階キーカラー & アイコンプリセット
 │   ├── services/
 │   │   ├── storage.ts              # IndexedDB 永続化 & Moodistory インポーター
+│   │   ├── dailySync.ts            # 日次 JSON / 画像メタ生成 & Android 同期ブリッジ
 │   │   ├── imageUtils.ts           # クライアント側 Canvas 画像リサイズ・JPEG圧縮
 │   │   └── notification.ts         # リマインダー通知スケジューラ
 │   └── App.tsx

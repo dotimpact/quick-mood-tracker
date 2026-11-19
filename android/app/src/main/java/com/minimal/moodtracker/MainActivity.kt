@@ -215,6 +215,20 @@ class MainActivity : Activity() {
                     }
                 }
             }.start()
+        } else if (requestCode == REQUEST_PICK_SYNC_FOLDER) {
+            val detail = if (resultCode == RESULT_OK && data?.data != null) {
+                val status = DailySyncManager.saveTreeUri(this, data.data!!, data.flags)
+                JSONObject().apply {
+                    put("cancelled", false)
+                    put("status", status)
+                }
+            } else {
+                JSONObject().apply {
+                    put("cancelled", true)
+                    put("status", DailySyncManager.getStatus(this@MainActivity))
+                }
+            }
+            dispatchCustomEvent("moodtracker:sync-folder-changed", detail)
         }
     }
 
@@ -296,6 +310,27 @@ class MainActivity : Activity() {
                 )
             }
             startActivityForResult(captureIntent, REQUEST_CAPTURE_PHOTO)
+        }
+    }
+
+    fun launchPickSyncFolder() {
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                )
+            }
+            startActivityForResult(intent, REQUEST_PICK_SYNC_FOLDER)
+        } catch (e: Exception) {
+            val detail = JSONObject().apply {
+                put("cancelled", true)
+                put("error", e.message ?: e.javaClass.simpleName)
+                put("status", DailySyncManager.getStatus(this@MainActivity))
+            }
+            dispatchCustomEvent("moodtracker:sync-folder-changed", detail)
         }
     }
 
@@ -465,6 +500,23 @@ class MainActivity : Activity() {
         return false
     }
 
+    private fun dispatchCustomEvent(eventName: String, detail: JSONObject) {
+        val wv = webView ?: return
+        val quotedEventName = JSONObject.quote(eventName)
+        val script = """
+            (function() {
+              var event = new CustomEvent($quotedEventName, {
+                cancelable: true,
+                detail: $detail
+              });
+              window.dispatchEvent(event);
+            })();
+        """.trimIndent()
+        wv.post {
+            wv.evaluateJavascript(script, null)
+        }
+    }
+
     private fun dispatchNotificationPermissionEvent(granted: Boolean, testSent: Boolean) {
         val wv = webView ?: return
         val script = """
@@ -559,11 +611,63 @@ class MainActivity : Activity() {
             }
             return true
         }
+
+        @JavascriptInterface
+        fun getDailySyncStatus(): String {
+            return DailySyncManager.getStatus(context).toString()
+        }
+
+        @JavascriptInterface
+        fun pickSyncFolder(): Boolean {
+            activity.runOnUiThread {
+                activity.launchPickSyncFolder()
+            }
+            return true
+        }
+
+        @JavascriptInterface
+        fun clearSyncFolder(): String {
+            return DailySyncManager.clearTreeUri(context).toString()
+        }
+
+        @JavascriptInterface
+        fun syncDayToFolder(
+            requestId: String,
+            dateKey: String,
+            dailyJson: String,
+            imagesJson: String,
+            pruneOrphanImages: Boolean
+        ): Boolean {
+            DailySyncManager.syncDayAsync(
+                context = context,
+                requestId = requestId,
+                dateKey = dateKey,
+                dailyJson = dailyJson,
+                imagesJson = imagesJson,
+                pruneOrphanImages = pruneOrphanImages
+            ) { result ->
+                activity.dispatchCustomEvent("moodtracker:sync-result", result)
+            }
+            return true
+        }
+
+        @JavascriptInterface
+        fun writeSyncIndexToFolder(requestId: String, indexJson: String): Boolean {
+            DailySyncManager.writeIndexAsync(
+                context = context,
+                requestId = requestId,
+                indexJson = indexJson
+            ) { result ->
+                activity.dispatchCustomEvent("moodtracker:sync-result", result)
+            }
+            return true
+        }
     }
 
     companion object {
         private const val REQUEST_SELECT_FILE = 2001
         private const val REQUEST_POST_NOTIFICATIONS = 2002
         private const val REQUEST_CAPTURE_PHOTO = 2003
+        private const val REQUEST_PICK_SYNC_FOLDER = 2004
     }
 }

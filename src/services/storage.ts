@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   ],
   nudgeEnabled: true,
   nudgeIntervalMinutes: 60,
+  dailySyncEnabled: true,
 };
 
 export function getCalendarDayKey(date: Date): string {
@@ -681,6 +682,10 @@ export function loadSettings(): AppSettings {
         typeof parsed.nudgeIntervalMinutes === 'number' && parsed.nudgeIntervalMinutes > 0
           ? parsed.nudgeIntervalMinutes
           : DEFAULT_SETTINGS.nudgeIntervalMinutes,
+      dailySyncEnabled:
+        typeof parsed.dailySyncEnabled === 'boolean'
+          ? parsed.dailySyncEnabled
+          : DEFAULT_SETTINGS.dailySyncEnabled,
     };
     syncNudgeSettingsToWidgetStorage(merged);
     return merged;

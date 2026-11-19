@@ -26,6 +26,15 @@ import {
   syncRoutineProgressToWidgetStorage,
 } from './services/storage';
 import { startNotificationScheduler } from './services/notification';
+import {
+  clearNativeSyncFolder,
+  getNativeSyncStatus,
+  getPendingSyncDates,
+  NativeSyncStatus,
+  pickNativeSyncFolder,
+  syncAllDays,
+  syncSpecificDates,
+} from './services/dailySync';
 import { MinimalIcon } from './components/MinimalIcon';
 import { QuickEntrySheet } from './components/QuickEntrySheet';
 import { LogTimeline } from './components/LogTimeline';
@@ -52,8 +61,85 @@ export const App: React.FC = () => {
 
   // Settings Modal state
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<NativeSyncStatus>(() => getNativeSyncStatus());
+  const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
+  const [syncProgressText, setSyncProgressText] = useState<string | null>(null);
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const lastTodayKeyRef = useRef<string>(getCalendarDayKey(new Date()));
+  const settingsRef = useRef<AppSettings>(settings);
+  settingsRef.current = settings;
+  const syncProgressTimerRef = useRef<number | null>(null);
+
+  const runFullSync = useCallback(
+    async (
+      targetLogs: MoodLog[],
+      targetRoutines: RoutineItem[],
+      targetRoutineLogs: RoutineDayLog[]
+    ) => {
+      if (syncProgressTimerRef.current !== null) {
+        window.clearTimeout(syncProgressTimerRef.current);
+        syncProgressTimerRef.current = null;
+      }
+      setIsSyncingAll(true);
+      setSyncProgressText('同期準備中...');
+      try {
+        const result = await syncAllDays(
+          targetLogs,
+          targetRoutines,
+          targetRoutineLogs,
+          (done, total) => {
+            setSyncProgressText(`同期中 ${done}/${total}...`);
+          }
+        );
+        setSyncStatus(result.status);
+        if (result.ok) {
+          setSyncProgressText(`完了 (${result.syncedDates.length}日分)`);
+        } else {
+          setSyncProgressText(result.error || '一部の同期に失敗しました');
+        }
+      } catch (err) {
+        setSyncStatus(getNativeSyncStatus());
+        setSyncProgressText(err instanceof Error ? err.message : '同期に失敗しました');
+      } finally {
+        setIsSyncingAll(false);
+        syncProgressTimerRef.current = window.setTimeout(() => {
+          setSyncProgressText(null);
+          syncProgressTimerRef.current = null;
+        }, 3000);
+      }
+    },
+    []
+  );
+
+  const syncDatesIfEnabled = useCallback(
+    async (
+      dateKeys: string[],
+      nextLogs: MoodLog[],
+      nextRoutines: RoutineItem[],
+      nextRoutineLogs: RoutineDayLog[],
+      overrideEnabled?: boolean
+    ) => {
+      const enabled = overrideEnabled ?? settingsRef.current.dailySyncEnabled;
+      if (!enabled) return;
+      const status = getNativeSyncStatus();
+      if (!status.supported || !status.configured || !status.hasPermission) {
+        setSyncStatus(status);
+        return;
+      }
+      try {
+        const result = await syncSpecificDates(
+          dateKeys,
+          nextLogs,
+          nextRoutines,
+          nextRoutineLogs
+        );
+        setSyncStatus(result.status);
+      } catch {
+        setSyncStatus(getNativeSyncStatus());
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const checkTimeAndDateRollover = () => {
@@ -93,6 +179,28 @@ export const App: React.FC = () => {
       setRoutines(loadedRoutines);
       setRoutineLogs(loadedRoutineLogs);
       void syncRoutineProgressToWidgetStorage(loadedRoutines, loadedRoutineLogs);
+
+      const currentStatus = getNativeSyncStatus();
+      setSyncStatus(currentStatus);
+      if (
+        settingsRef.current.dailySyncEnabled &&
+        currentStatus.supported &&
+        currentStatus.configured &&
+        currentStatus.hasPermission
+      ) {
+        const pendingDates = getPendingSyncDates();
+        if (currentStatus.lastSyncedAt === 0) {
+          void runFullSync(loadedLogs, loadedRoutines, loadedRoutineLogs);
+        } else if (pendingDates.length > 0) {
+          void syncDatesIfEnabled(
+            pendingDates,
+            loadedLogs,
+            loadedRoutines,
+            loadedRoutineLogs,
+            true
+          );
+        }
+      }
     });
 
     const params = new URLSearchParams(window.location.search);
@@ -178,6 +286,7 @@ export const App: React.FC = () => {
   const handleSaveEntry = async (
     entry: Omit<MoodLog, 'id' | 'timestamp'> & { id?: string; timestamp?: number }
   ) => {
+    const previousEditingLog = editingLog;
     const newLog: MoodLog = {
       id: entry.id || `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       timestamp: entry.timestamp || Date.now(),
@@ -196,6 +305,15 @@ export const App: React.FC = () => {
     setIsSheetOpen(false);
     setEditingLog(null);
     setSheetInitialImage(undefined);
+
+    const affectedDates = [getCalendarDayKey(new Date(newLog.timestamp))];
+    if (previousEditingLog) {
+      const prevDate = getCalendarDayKey(new Date(previousEditingLog.timestamp));
+      if (!affectedDates.includes(prevDate)) {
+        affectedDates.push(prevDate);
+      }
+    }
+    void syncDatesIfEnabled(affectedDates, refreshed, routines, routineLogs);
   };
 
   const handleEditLog = (log: MoodLog) => {
@@ -206,6 +324,7 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteLog = async (id: string) => {
+    const deletedLog = logs.find((l) => l.id === id);
     await deleteLog(id);
     const refreshed = await getAllLogs();
     setLogs(refreshed);
@@ -213,6 +332,15 @@ export const App: React.FC = () => {
     setIsSheetOpen(false);
     setEditingLog(null);
     setSheetInitialImage(undefined);
+
+    if (deletedLog) {
+      void syncDatesIfEnabled(
+        [getCalendarDayKey(new Date(deletedLog.timestamp))],
+        refreshed,
+        routines,
+        routineLogs
+      );
+    }
   };
 
   const handleToggleRoutine = async (dateKey: string, routineId: string) => {
@@ -233,6 +361,7 @@ export const App: React.FC = () => {
     await saveRoutineDayLog(entry);
     const refreshed = await getAllRoutineLogs();
     setRoutineLogs(refreshed);
+    void syncDatesIfEnabled([dateKey], logs, routines, refreshed);
   };
 
   const handleUpdateRoutineComment = async (
@@ -255,6 +384,7 @@ export const App: React.FC = () => {
     await saveRoutineDayLog(entry);
     const refreshed = await getAllRoutineLogs();
     setRoutineLogs(refreshed);
+    void syncDatesIfEnabled([dateKey], logs, routines, refreshed);
   };
 
   const handleAddRoutine = async (title: string, icon: string) => {
@@ -270,12 +400,24 @@ export const App: React.FC = () => {
     await saveRoutine(item);
     const refreshed = await getAllRoutines();
     setRoutines(refreshed);
+    void syncDatesIfEnabled(
+      [selectedRoutineDateKey, getCalendarDayKey(new Date())],
+      logs,
+      refreshed,
+      routineLogs
+    );
   };
 
   const handleUpdateRoutine = async (item: RoutineItem) => {
     await saveRoutine(item);
     const refreshed = await getAllRoutines();
     setRoutines(refreshed);
+    void syncDatesIfEnabled(
+      [selectedRoutineDateKey, getCalendarDayKey(new Date())],
+      logs,
+      refreshed,
+      routineLogs
+    );
   };
 
   const handleReorderRoutines = async (items: RoutineItem[]) => {
@@ -284,6 +426,12 @@ export const App: React.FC = () => {
     await saveAllRoutines([...items, ...preservedArchived]);
     const refreshed = await getAllRoutines();
     setRoutines(refreshed);
+    void syncDatesIfEnabled(
+      [selectedRoutineDateKey, getCalendarDayKey(new Date())],
+      logs,
+      refreshed,
+      routineLogs
+    );
   };
 
   const handleDeleteRoutine = async (id: string) => {
@@ -296,6 +444,12 @@ export const App: React.FC = () => {
     });
     const refreshed = await getAllRoutines();
     setRoutines(refreshed);
+    void syncDatesIfEnabled(
+      [selectedRoutineDateKey, getCalendarDayKey(new Date())],
+      logs,
+      refreshed,
+      routineLogs
+    );
   };
 
   const handleOpenRoutineDate = (dateKey: string) => {
@@ -304,8 +458,41 @@ export const App: React.FC = () => {
   };
 
   const handleUpdateSettings = (next: AppSettings) => {
+    const turnedSyncOn = !settings.dailySyncEnabled && next.dailySyncEnabled;
     setSettings(next);
     saveSettings(next);
+    if (turnedSyncOn) {
+      const pendingDates = getPendingSyncDates();
+      if (pendingDates.length > 0) {
+        void syncDatesIfEnabled(pendingDates, logs, routines, routineLogs, true);
+      }
+    }
+  };
+
+  const handlePickSyncFolder = async () => {
+    const result = await pickNativeSyncFolder();
+    setSyncStatus(result.status);
+    if (!result.cancelled && result.status.configured && result.status.hasPermission) {
+      if (!settingsRef.current.dailySyncEnabled) {
+        const nextSettings: AppSettings = {
+          ...settingsRef.current,
+          dailySyncEnabled: true,
+        };
+        setSettings(nextSettings);
+        saveSettings(nextSettings);
+      }
+      await runFullSync(logs, routines, routineLogs);
+    }
+  };
+
+  const handleClearSyncFolder = () => {
+    const nextStatus = clearNativeSyncFolder();
+    setSyncStatus(nextStatus);
+    setSyncProgressText(null);
+  };
+
+  const handleSyncAllDays = () => {
+    void runFullSync(logs, routines, routineLogs);
   };
 
   const handleExportJson = () => {
@@ -330,6 +517,16 @@ export const App: React.FC = () => {
     setLogs(refreshedLogs);
     setRoutines(refreshedRoutines);
     setRoutineLogs(refreshedRoutineLogs);
+
+    const currentStatus = getNativeSyncStatus();
+    if (
+      settingsRef.current.dailySyncEnabled &&
+      currentStatus.supported &&
+      currentStatus.configured &&
+      currentStatus.hasPermission
+    ) {
+      void runFullSync(refreshedLogs, refreshedRoutines, refreshedRoutineLogs);
+    }
     return count;
   };
 
@@ -496,7 +693,10 @@ export const App: React.FC = () => {
           {/* 5. Settings */}
           <button
             type="button"
-            onClick={() => setIsSettingsOpen(true)}
+            onClick={() => {
+              setSyncStatus(getNativeSyncStatus());
+              setIsSettingsOpen(true);
+            }}
             aria-label="Settings"
             className="w-12 h-11 rounded-xl flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors active:scale-95"
           >
@@ -533,6 +733,12 @@ export const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         onExportJson={handleExportJson}
         onImportFile={handleImportFile}
+        syncStatus={syncStatus}
+        isSyncingAll={isSyncingAll}
+        syncProgressText={syncProgressText}
+        onPickSyncFolder={handlePickSyncFolder}
+        onClearSyncFolder={handleClearSyncFolder}
+        onSyncAllDays={handleSyncAllDays}
       />
     </div>
   );

@@ -55,11 +55,17 @@ import {
   ChevronDown,
   ChevronUp,
   Camera,
+  Folder,
+  FolderOpen,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   Camera,
+  Folder,
+  FolderOpen,
+  RefreshCw,
   ChevronDown,
   ChevronUp,
   Calendar,
