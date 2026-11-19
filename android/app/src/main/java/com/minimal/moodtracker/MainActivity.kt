@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Base64
 import android.util.Log
+import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
@@ -685,6 +686,21 @@ class MainActivity : Activity() {
                 activity.ensureNotificationPermissionIfNeeded(sendTestAfter = false)
             }
             ReminderReceiver.saveAndSchedule(context, enabled, timesCsv)
+        }
+
+        @JavascriptInterface
+        fun performHaptic(kind: String) {
+            val constant = when (kind) {
+                "confirm" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    HapticFeedbackConstants.CONFIRM
+                } else {
+                    HapticFeedbackConstants.VIRTUAL_KEY
+                }
+                else -> HapticFeedbackConstants.CLOCK_TICK
+            }
+            activity.runOnUiThread {
+                activity.webView?.performHapticFeedback(constant)
+            }
         }
 
         @JavascriptInterface
