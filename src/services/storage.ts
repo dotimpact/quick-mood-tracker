@@ -129,6 +129,15 @@ function createSampleCafeSunsetSvg(): string {
 }
 
 interface AndroidWidgetBridgeShape {
+  syncWidgetState?: (
+    hasLatest: boolean,
+    latestMood: number,
+    latestTimestampStr: string,
+    hasPhoto: boolean,
+    photoMood: number,
+    photoTimestampStr: string,
+    photoDataUrl: string
+  ) => void;
   syncWidget?: (mood: number, ts: number, photo: string) => void;
   syncRoutineWidget?: (dateKey: string, completed: number, total: number) => void;
   syncWidgetNudge?: (intervalMinutes: number) => void;
@@ -139,37 +148,97 @@ function getWidgetBridge(): AndroidWidgetBridgeShape | undefined {
   return (window as unknown as { AndroidBridge?: AndroidWidgetBridgeShape }).AndroidBridge;
 }
 
-function mirrorLogToWidgetStorage(log: MoodLog): void {
-  localStorage.setItem('widget_last_mood', String(log.mood));
-  localStorage.setItem('widget_last_timestamp', String(log.timestamp));
-  if (log.imageDataUrl) {
-    localStorage.setItem('widget_last_photo_data', log.imageDataUrl);
-    localStorage.setItem('widget_last_photo_mood', String(log.mood));
-    localStorage.setItem('widget_last_photo_timestamp', String(log.timestamp));
+export async function syncLogsToWidgetStorage(providedLogs?: MoodLog[]): Promise<void> {
+  const logs = providedLogs ?? (await getAllLogs());
+  const validLogs = logs.filter(
+    (l) => typeof l.timestamp === 'number' && Number.isFinite(l.timestamp) && l.timestamp > 0
+  );
+  const sorted = [...validLogs].sort((a, b) => b.timestamp - a.timestamp);
+  const latest = sorted[0] ?? null;
+  const latestWithPhoto =
+    sorted.find(
+      (l) => typeof l.imageDataUrl === 'string' && l.imageDataUrl.startsWith('data:image/')
+    ) ?? null;
+
+  try {
+    if (latest) {
+      localStorage.setItem('widget_last_mood', String(latest.mood));
+      localStorage.setItem('widget_last_timestamp', String(Math.round(latest.timestamp)));
+    } else {
+      localStorage.removeItem('widget_last_mood');
+      localStorage.removeItem('widget_last_timestamp');
+    }
+
+    if (latestWithPhoto && latestWithPhoto.imageDataUrl) {
+      localStorage.setItem('widget_last_photo_mood', String(latestWithPhoto.mood));
+      localStorage.setItem(
+        'widget_last_photo_timestamp',
+        String(Math.round(latestWithPhoto.timestamp))
+      );
+    } else {
+      localStorage.removeItem('widget_last_photo_mood');
+      localStorage.removeItem('widget_last_photo_timestamp');
+    }
+  } catch {
+    // Ignore localStorage quota or availability errors
   }
+
+  try {
+    if (latestWithPhoto && latestWithPhoto.imageDataUrl) {
+      localStorage.setItem('widget_last_photo_data', latestWithPhoto.imageDataUrl);
+    } else {
+      localStorage.removeItem('widget_last_photo_data');
+    }
+  } catch {
+    // Ignore large photo quota errors so native widget sync still proceeds
+  }
+
   try {
     const bridge = getWidgetBridge();
-    if (bridge && typeof bridge.syncWidget === 'function') {
-      bridge.syncWidget(log.mood, log.timestamp, log.imageDataUrl || '');
+    const hasLatest = Boolean(latest);
+    const latestMood = latest ? latest.mood : 4;
+    const latestTimestampStr = latest ? String(Math.round(latest.timestamp)) : '';
+    const hasPhoto = Boolean(latestWithPhoto && latestWithPhoto.imageDataUrl);
+    const photoMood = latestWithPhoto ? latestWithPhoto.mood : 4;
+    const photoTimestampStr = latestWithPhoto ? String(Math.round(latestWithPhoto.timestamp)) : '';
+    const photoDataUrl = latestWithPhoto?.imageDataUrl || '';
+
+    if (bridge && typeof bridge.syncWidgetState === 'function') {
+      try {
+        bridge.syncWidgetState(
+          hasLatest,
+          latestMood,
+          latestTimestampStr,
+          hasPhoto,
+          photoMood,
+          photoTimestampStr,
+          photoDataUrl
+        );
+      } catch {
+        if (hasPhoto) {
+          bridge.syncWidgetState(
+            hasLatest,
+            latestMood,
+            latestTimestampStr,
+            false,
+            4,
+            '',
+            ''
+          );
+        }
+      }
+    } else if (bridge && typeof bridge.syncWidget === 'function' && latest) {
+      if (latestWithPhoto && latestWithPhoto.id !== latest.id && latestWithPhoto.imageDataUrl) {
+        bridge.syncWidget(
+          latestWithPhoto.mood,
+          Math.round(latestWithPhoto.timestamp),
+          latestWithPhoto.imageDataUrl
+        );
+      }
+      bridge.syncWidget(latest.mood, Math.round(latest.timestamp), latest.imageDataUrl || '');
     }
   } catch {
     // Ignore when not in Android WebView
-  }
-}
-
-export async function syncLogsToWidgetStorage(providedLogs?: MoodLog[]): Promise<void> {
-  const logs = providedLogs ?? (await getAllLogs());
-  if (logs.length === 0) return;
-
-  const sorted = [...logs].sort((a, b) => b.timestamp - a.timestamp);
-  const latest = sorted[0];
-  const latestWithPhoto = sorted.find((l) => Boolean(l.imageDataUrl));
-
-  if (latestWithPhoto && latestWithPhoto.id !== latest.id) {
-    mirrorLogToWidgetStorage(latestWithPhoto);
-  }
-  if (latest) {
-    mirrorLogToWidgetStorage(latest);
   }
 }
 
@@ -185,9 +254,13 @@ export async function syncRoutineProgressToWidgetStorage(
   const todayKey = getCalendarDayKey(new Date());
   const { completed, total } = getRoutineDayProgress(todayKey, routines, routineLogs);
 
-  localStorage.setItem('widget_routine_date', todayKey);
-  localStorage.setItem('widget_routine_completed', String(completed));
-  localStorage.setItem('widget_routine_total', String(total));
+  try {
+    localStorage.setItem('widget_routine_date', todayKey);
+    localStorage.setItem('widget_routine_completed', String(completed));
+    localStorage.setItem('widget_routine_total', String(total));
+  } catch {
+    // Ignore localStorage errors
+  }
 
   try {
     const bridge = getWidgetBridge();
@@ -203,7 +276,11 @@ export function syncNudgeSettingsToWidgetStorage(settings: AppSettings): void {
   const effectiveMinutes = settings.nudgeEnabled
     ? Math.max(1, Math.round(settings.nudgeIntervalMinutes || 60))
     : 0;
-  localStorage.setItem('widget_nudge_interval_minutes', String(effectiveMinutes));
+  try {
+    localStorage.setItem('widget_nudge_interval_minutes', String(effectiveMinutes));
+  } catch {
+    // Ignore localStorage errors
+  }
   try {
     const bridge = getWidgetBridge();
     if (bridge && typeof bridge.syncWidgetNudge === 'function') {
@@ -257,6 +334,7 @@ export async function getAllLogs(): Promise<MoodLog[]> {
 }
 
 export async function saveLog(log: MoodLog): Promise<void> {
+  let updatedFallback: MoodLog[] | undefined;
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
@@ -265,17 +343,18 @@ export async function saveLog(log: MoodLog): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-    await syncLogsToWidgetStorage();
   } catch {
     const existing = await getAllLogs();
     const filtered = existing.filter((i) => i.id !== log.id);
     const updated = [log, ...filtered].sort((a, b) => b.timestamp - a.timestamp);
     localStorage.setItem('fallback_mood_logs', JSON.stringify(updated));
-    await syncLogsToWidgetStorage(updated);
+    updatedFallback = updated;
   }
+  await syncLogsToWidgetStorage(updatedFallback);
 }
 
 export async function deleteLog(id: string): Promise<void> {
+  let updatedFallback: MoodLog[] | undefined;
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
@@ -284,13 +363,13 @@ export async function deleteLog(id: string): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-    await syncLogsToWidgetStorage();
   } catch {
     const existing = await getAllLogs();
     const updated = existing.filter((i) => i.id !== id);
     localStorage.setItem('fallback_mood_logs', JSON.stringify(updated));
-    await syncLogsToWidgetStorage(updated);
+    updatedFallback = updated;
   }
+  await syncLogsToWidgetStorage(updatedFallback);
 }
 
 export async function seedInitialLogsIfEmpty(): Promise<MoodLog[]> {

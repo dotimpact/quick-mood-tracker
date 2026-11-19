@@ -17,6 +17,7 @@ import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import android.util.Base64
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import java.text.SimpleDateFormat
@@ -34,10 +35,22 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray
     ) {
+        val appContext = context.applicationContext
+        val nowMillis = System.currentTimeMillis()
         for (appWidgetId in appWidgetIds) {
-            updateAppWidget(context, appWidgetManager, appWidgetId)
+            updateAppWidget(appContext, appWidgetManager, appWidgetId, nowMillis)
         }
-        scheduleNextNudgeRefresh(context)
+        scheduleNextNudgeRefresh(appContext, nowMillis)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        val appContext = context.applicationContext
+        val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val refreshIntent = Intent(appContext, PhotoMoodWidgetProvider::class.java).apply {
+            action = ACTION_REFRESH_WIDGET
+        }
+        cancelNudgeRefreshAlarm(appContext, alarmManager, refreshIntent)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -87,19 +100,41 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
          * Refreshes all active instances of the 2x2 photo mood widget.
          */
         fun updateAllWidgets(context: Context) {
-            val manager = AppWidgetManager.getInstance(context)
-            val componentName = ComponentName(context, PhotoMoodWidgetProvider::class.java)
+            val appContext = context.applicationContext
+            val manager = AppWidgetManager.getInstance(appContext)
+            val componentName = ComponentName(appContext, PhotoMoodWidgetProvider::class.java)
             val widgetIds = manager.getAppWidgetIds(componentName)
-            for (widgetId in widgetIds) {
-                updateAppWidget(context, manager, widgetId)
+            if (widgetIds.isEmpty()) {
+                val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                if (alarmManager != null) {
+                    val refreshIntent = Intent(appContext, PhotoMoodWidgetProvider::class.java).apply {
+                        action = ACTION_REFRESH_WIDGET
+                    }
+                    cancelNudgeRefreshAlarm(appContext, alarmManager, refreshIntent)
+                }
+                return
             }
-            scheduleNextNudgeRefresh(context)
+
+            val nowMillis = System.currentTimeMillis()
+            val lastTs = readLatestPostTimestamp(appContext)
+            val interval = readNudgeIntervalMinutes(appContext)
+            val nudge = isPostNudgeActive(appContext, nowMillis)
+            Log.d(
+                "PhotoMoodWidget",
+                "updateAllWidgets ids=${widgetIds.size} lastTs=$lastTs interval=$interval nudge=$nudge"
+            )
+
+            for (widgetId in widgetIds) {
+                updateAppWidget(appContext, manager, widgetId, nowMillis)
+            }
+            scheduleNextNudgeRefresh(appContext, nowMillis)
         }
 
         private fun updateAppWidget(
             context: Context,
             appWidgetManager: AppWidgetManager,
-            appWidgetId: Int
+            appWidgetId: Int,
+            nowMillis: Long = System.currentTimeMillis()
         ) {
             val views = RemoteViews(context.packageName, R.layout.widget_photo_mood)
 
@@ -147,7 +182,7 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             }
 
             val (routineCompleted, routineTotal) = readRoutineProgress(context)
-            val nudgeActive = isPostNudgeActive(context)
+            val nudgeActive = isPostNudgeActive(context, nowMillis)
 
             views.setImageViewBitmap(
                 R.id.widget_btn_routine_progress,
@@ -272,13 +307,8 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
         }
 
         private fun readLatestPostTimestamp(context: Context): Long? {
-            val lastTs = readLongPref(context, KEY_LAST_TIMESTAMP)
-            val lastPhotoTs = readLongPref(context, KEY_LAST_PHOTO_TIMESTAMP)
-            return when {
-                lastTs != null && lastPhotoTs != null -> maxOf(lastTs, lastPhotoTs)
-                lastTs != null -> lastTs
-                else -> lastPhotoTs
-            }
+            return readLongPref(context, KEY_LAST_TIMESTAMP)
+                ?: readLongPref(context, KEY_LAST_PHOTO_TIMESTAMP)
         }
 
         private fun readNudgeIntervalMinutes(context: Context): Int {
@@ -292,11 +322,14 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             return (parsed ?: DEFAULT_NUDGE_INTERVAL_MINUTES).coerceAtLeast(0)
         }
 
-        private fun isPostNudgeActive(context: Context): Boolean {
+        private fun isPostNudgeActive(
+            context: Context,
+            nowMillis: Long = System.currentTimeMillis()
+        ): Boolean {
             val intervalMinutes = readNudgeIntervalMinutes(context)
             if (intervalMinutes <= 0) return false
             val lastTimestamp = readLatestPostTimestamp(context) ?: return true
-            val elapsedMillis = System.currentTimeMillis() - lastTimestamp
+            val elapsedMillis = nowMillis - lastTimestamp
             return elapsedMillis >= intervalMinutes * 60_000L
         }
 
@@ -327,7 +360,10 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             return safeCompleted to safeTotal
         }
 
-        private fun scheduleNextNudgeRefresh(context: Context) {
+        private fun scheduleNextNudgeRefresh(
+            context: Context,
+            nowMillis: Long = System.currentTimeMillis()
+        ) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
             val refreshIntent = Intent(context, PhotoMoodWidgetProvider::class.java).apply {
                 action = ACTION_REFRESH_WIDGET
@@ -335,7 +371,6 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
 
             val intervalMinutes = readNudgeIntervalMinutes(context)
             val lastTimestamp = readLatestPostTimestamp(context)
-            val now = System.currentTimeMillis()
 
             if (intervalMinutes <= 0 || lastTimestamp == null) {
                 cancelNudgeRefreshAlarm(context, alarmManager, refreshIntent)
@@ -343,7 +378,7 @@ class PhotoMoodWidgetProvider : AppWidgetProvider() {
             }
 
             val triggerAtMillis = lastTimestamp + intervalMinutes * 60_000L
-            if (triggerAtMillis <= now) {
+            if (triggerAtMillis <= nowMillis) {
                 cancelNudgeRefreshAlarm(context, alarmManager, refreshIntent)
                 return
             }

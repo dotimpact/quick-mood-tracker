@@ -55,11 +55,12 @@ class QuickMoodWidgetProvider : AppWidgetProvider() {
          * Refreshes all active instances of the quick mood widget.
          */
         fun updateAllWidgets(context: Context) {
-            val manager = AppWidgetManager.getInstance(context)
-            val componentName = ComponentName(context, QuickMoodWidgetProvider::class.java)
+            val appContext = context.applicationContext
+            val manager = AppWidgetManager.getInstance(appContext)
+            val componentName = ComponentName(appContext, QuickMoodWidgetProvider::class.java)
             val widgetIds = manager.getAppWidgetIds(componentName)
             for (widgetId in widgetIds) {
-                updateAppWidget(context, manager, widgetId)
+                updateAppWidget(appContext, manager, widgetId)
             }
         }
 

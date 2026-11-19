@@ -213,15 +213,23 @@ export const App: React.FC = () => {
         setSelectedRoutineDateKey(getCalendarDayKey(new Date()));
       }
     }
+    const clearQueryParams = () => {
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {
+        // Ignore history restrictions on file:// URLs
+      }
+    };
+
     if (moodParam >= 1 && moodParam <= 5) {
       setSheetInitialMood(moodParam as MoodLevel);
       setIsSheetOpen(true);
-      window.history.replaceState({}, '', window.location.pathname);
+      clearQueryParams();
     } else if (openSheetParam === '1') {
       setIsSheetOpen(true);
-      window.history.replaceState({}, '', window.location.pathname);
+      clearQueryParams();
     } else if (tabParam) {
-      window.history.replaceState({}, '', window.location.pathname);
+      clearQueryParams();
     }
 
     const handleNativeWidgetEvent = (e: Event) => {
@@ -248,9 +256,16 @@ export const App: React.FC = () => {
       }
     };
     const handleCameraPhotoEvent = (e: Event) => {
-      const custom = e as CustomEvent<{ imageDataUrl?: string; openSheet?: boolean }>;
+      const custom = e as CustomEvent<{
+        imageDataUrl?: string;
+        openSheet?: boolean;
+        isNewEntry?: boolean;
+      }>;
       const dataUrl = custom.detail?.imageDataUrl;
       if (dataUrl) {
+        if (custom.detail?.isNewEntry) {
+          setEditingLog(null);
+        }
         setSheetInitialImage(dataUrl);
         setIsSheetOpen(true);
       }
@@ -517,6 +532,7 @@ export const App: React.FC = () => {
     setLogs(refreshedLogs);
     setRoutines(refreshedRoutines);
     setRoutineLogs(refreshedRoutineLogs);
+    setNowTick(Date.now());
 
     const currentStatus = getNativeSyncStatus();
     if (

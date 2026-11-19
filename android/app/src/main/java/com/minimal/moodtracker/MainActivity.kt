@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.util.Base64
+import android.util.Log
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowInsets
@@ -41,6 +42,8 @@ class MainActivity : Activity() {
     private var pendingTestNotification: Boolean = false
     private var isPageLoaded: Boolean = false
     private var pendingCameraPhotoDataUrl: String? = null
+    private var pendingCameraFromWidget: Boolean = false
+    private var isWidgetCameraCapture: Boolean = false
 
     private data class QuickEntryRequest(
         val mood: Int?,
@@ -83,13 +86,15 @@ class MainActivity : Activity() {
                     super.onPageFinished(view, url)
                     isPageLoaded = true
                     pendingCameraPhotoDataUrl?.let { dataUrl ->
+                        val fromWidget = pendingCameraFromWidget
                         pendingCameraPhotoDataUrl = null
-                        deliverCameraPhotoToWebView(dataUrl)
+                        pendingCameraFromWidget = false
+                        deliverCameraPhotoToWebView(dataUrl, fromWidget)
                     }
                     extractQuickEntryRequest(intent)?.let { req ->
                         clearQuickEntryIntent(intent)
                         if (req.launchCamera) {
-                            launchCameraCapture()
+                            launchCameraCapture(fromWidget = true)
                         } else {
                             dispatchQuickEntryEvent(req)
                         }
@@ -185,7 +190,7 @@ class MainActivity : Activity() {
         extractQuickEntryRequest(intent)?.let { request ->
             clearQuickEntryIntent(intent)
             if (request.launchCamera) {
-                launchCameraCapture()
+                launchCameraCapture(fromWidget = true)
             } else {
                 dispatchQuickEntryEvent(request)
             }
@@ -203,18 +208,22 @@ class MainActivity : Activity() {
                 null
             }
             callback.onReceiveValue(resultUri)
-        } else if (requestCode == REQUEST_CAPTURE_PHOTO && resultCode == RESULT_OK) {
-            val captureFile = File(cacheDir, "camera_capture.jpg")
-            @Suppress("DEPRECATION")
-            val fallbackBitmap = data?.extras?.get("data") as? Bitmap
-            Thread {
-                val dataUrl = processCapturedPhoto(captureFile, fallbackBitmap)
-                if (dataUrl != null) {
-                    runOnUiThread {
-                        deliverCameraPhotoToWebView(dataUrl)
+        } else if (requestCode == REQUEST_CAPTURE_PHOTO) {
+            val fromWidget = isWidgetCameraCapture
+            isWidgetCameraCapture = false
+            if (resultCode == RESULT_OK) {
+                val captureFile = File(cacheDir, "camera_capture.jpg")
+                @Suppress("DEPRECATION")
+                val fallbackBitmap = data?.extras?.get("data") as? Bitmap
+                Thread {
+                    val dataUrl = processCapturedPhoto(captureFile, fallbackBitmap)
+                    if (dataUrl != null) {
+                        runOnUiThread {
+                            deliverCameraPhotoToWebView(dataUrl, fromWidget)
+                        }
                     }
-                }
-            }.start()
+                }.start()
+            }
         } else if (requestCode == REQUEST_PICK_SYNC_FOLDER) {
             val detail = if (resultCode == RESULT_OK && data?.data != null) {
                 val status = DailySyncManager.saveTreeUri(this, data.data!!, data.flags)
@@ -292,7 +301,8 @@ class MainActivity : Activity() {
         intent.removeExtra(PhotoMoodWidgetProvider.EXTRA_OPEN_TAB)
     }
 
-    fun launchCameraCapture() {
+    fun launchCameraCapture(fromWidget: Boolean = false) {
+        isWidgetCameraCapture = fromWidget
         runCatching {
             val captureFile = File(cacheDir, "camera_capture.jpg")
             if (captureFile.exists()) {
@@ -310,6 +320,8 @@ class MainActivity : Activity() {
                 )
             }
             startActivityForResult(captureIntent, REQUEST_CAPTURE_PHOTO)
+        }.onFailure {
+            isWidgetCameraCapture = false
         }
     }
 
@@ -413,10 +425,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun deliverCameraPhotoToWebView(dataUrl: String) {
+    private fun deliverCameraPhotoToWebView(dataUrl: String, isNewEntry: Boolean = false) {
         val wv = webView
         if (!isPageLoaded || wv == null) {
             pendingCameraPhotoDataUrl = dataUrl
+            pendingCameraFromWidget = isNewEntry
             return
         }
         val quotedDataUrl = JSONObject.quote(dataUrl)
@@ -424,7 +437,7 @@ class MainActivity : Activity() {
             (function() {
               var event = new CustomEvent('moodtracker:camera-photo', {
                 cancelable: true,
-                detail: { imageDataUrl: $quotedDataUrl, openSheet: true }
+                detail: { imageDataUrl: $quotedDataUrl, openSheet: true, isNewEntry: $isNewEntry }
               });
               window.dispatchEvent(event);
             })();
@@ -535,42 +548,111 @@ class MainActivity : Activity() {
 
     class AndroidWidgetBridge(private val activity: MainActivity) {
         private val context: Context get() = activity
+        private val appContext: Context get() = activity.applicationContext
+
+        private fun parsePositiveEpochMillis(raw: String?): Long? {
+            val trimmed = raw?.trim().orEmpty()
+            if (trimmed.isEmpty()) return null
+            val parsed = trimmed.toLongOrNull() ?: trimmed.toDoubleOrNull()?.toLong() ?: return null
+            return parsed.takeIf { it > 0L }
+        }
+
+        @JavascriptInterface
+        fun syncWidgetState(
+            hasLatest: Boolean,
+            latestMood: Int,
+            latestTimestampStr: String,
+            hasPhoto: Boolean,
+            photoMood: Int,
+            photoTimestampStr: String,
+            photoDataUrl: String
+        ) {
+            try {
+                val prefs = appContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+                val latestTs = parsePositiveEpochMillis(latestTimestampStr)
+                val photoTs = parsePositiveEpochMillis(photoTimestampStr)
+
+                if (hasLatest && latestTs != null) {
+                    editor.putString("widget_last_mood", latestMood.coerceIn(1, 5).toString())
+                    editor.putString("widget_last_timestamp", latestTs.toString())
+                } else {
+                    editor.remove("widget_last_mood")
+                    editor.remove("widget_last_timestamp")
+                }
+
+                if (hasPhoto && photoTs != null && photoDataUrl.isNotBlank() && photoDataUrl.startsWith("data:image/")) {
+                    editor.putString("widget_last_photo_mood", photoMood.coerceIn(1, 5).toString())
+                    editor.putString("widget_last_photo_timestamp", photoTs.toString())
+                    val existingPhotoData = prefs.getString("widget_last_photo_data", null)
+                    if (existingPhotoData != photoDataUrl) {
+                        editor.putString("widget_last_photo_data", photoDataUrl)
+                    }
+                } else {
+                    editor.remove("widget_last_photo_data")
+                    editor.remove("widget_last_photo_mood")
+                    editor.remove("widget_last_photo_timestamp")
+                }
+
+                editor.commit()
+
+                QuickMoodWidgetProvider.updateAllWidgets(appContext)
+                PhotoMoodWidgetProvider.updateAllWidgets(appContext)
+            } catch (e: Exception) {
+                Log.e("MoodWidgetBridge", "syncWidgetState failed", e)
+            }
+        }
 
         @JavascriptInterface
         fun syncWidget(mood: Int, timestamp: Long, photoDataUrl: String) {
-            val prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
-            val editor = prefs.edit()
-            editor.putString("widget_last_mood", mood.toString())
-            editor.putString("widget_last_timestamp", timestamp.toString())
-            if (photoDataUrl.isNotBlank() && photoDataUrl.startsWith("data:image/")) {
-                editor.putString("widget_last_photo_data", photoDataUrl)
-                editor.putString("widget_last_photo_mood", mood.toString())
-                editor.putString("widget_last_photo_timestamp", timestamp.toString())
-            }
-            editor.apply()
+            try {
+                val prefs = appContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+                editor.putString("widget_last_mood", mood.coerceIn(1, 5).toString())
+                editor.putString("widget_last_timestamp", timestamp.toString())
+                if (photoDataUrl.isNotBlank() && photoDataUrl.startsWith("data:image/")) {
+                    val existingPhotoData = prefs.getString("widget_last_photo_data", null)
+                    if (existingPhotoData != photoDataUrl) {
+                        editor.putString("widget_last_photo_data", photoDataUrl)
+                    }
+                    editor.putString("widget_last_photo_mood", mood.coerceIn(1, 5).toString())
+                    editor.putString("widget_last_photo_timestamp", timestamp.toString())
+                }
+                editor.commit()
 
-            QuickMoodWidgetProvider.updateAllWidgets(context)
-            PhotoMoodWidgetProvider.updateAllWidgets(context)
+                QuickMoodWidgetProvider.updateAllWidgets(appContext)
+                PhotoMoodWidgetProvider.updateAllWidgets(appContext)
+            } catch (e: Exception) {
+                Log.e("MoodWidgetBridge", "syncWidget failed", e)
+            }
         }
 
         @JavascriptInterface
         fun syncRoutineWidget(dateKey: String, completed: Int, total: Int) {
-            val prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
-            prefs.edit()
-                .putString("widget_routine_date", dateKey)
-                .putInt("widget_routine_completed", completed.coerceAtLeast(0))
-                .putInt("widget_routine_total", total.coerceAtLeast(0))
-                .apply()
-            PhotoMoodWidgetProvider.updateAllWidgets(context)
+            try {
+                val prefs = appContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("widget_routine_date", dateKey)
+                    .putInt("widget_routine_completed", completed.coerceAtLeast(0))
+                    .putInt("widget_routine_total", total.coerceAtLeast(0))
+                    .commit()
+                PhotoMoodWidgetProvider.updateAllWidgets(appContext)
+            } catch (e: Exception) {
+                Log.e("MoodWidgetBridge", "syncRoutineWidget failed", e)
+            }
         }
 
         @JavascriptInterface
         fun syncWidgetNudge(intervalMinutes: Int) {
-            val prefs = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
-            prefs.edit()
-                .putInt("widget_nudge_interval_minutes", intervalMinutes.coerceAtLeast(0))
-                .apply()
-            PhotoMoodWidgetProvider.updateAllWidgets(context)
+            try {
+                val prefs = appContext.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putInt("widget_nudge_interval_minutes", intervalMinutes.coerceAtLeast(0))
+                    .commit()
+                PhotoMoodWidgetProvider.updateAllWidgets(appContext)
+            } catch (e: Exception) {
+                Log.e("MoodWidgetBridge", "syncWidgetNudge failed", e)
+            }
         }
 
         @JavascriptInterface
@@ -607,7 +689,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun launchCamera(): Boolean {
             activity.runOnUiThread {
-                activity.launchCameraCapture()
+                activity.launchCameraCapture(fromWidget = false)
             }
             return true
         }
