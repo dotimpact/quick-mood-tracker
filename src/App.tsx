@@ -739,6 +739,7 @@ export const App: React.FC = () => {
         initialMood={sheetInitialMood}
         initialImageDataUrl={sheetInitialImage}
         editingLog={editingLog}
+        logs={logs}
         onClose={() => {
           setIsSheetOpen(false);
           setEditingLog(null);
