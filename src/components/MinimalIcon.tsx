@@ -58,10 +58,39 @@ import {
   Folder,
   FolderOpen,
   RefreshCw,
+  Croissant,
+  Sandwich,
+  CookingPot,
+  CakeSlice,
+  Wine,
+  Tv,
+  Clapperboard,
+  Dumbbell,
+  Bath,
   type LucideIcon,
 } from 'lucide-react';
+import {
+  IconArmchair,
+  IconBattery1,
+  IconBowl,
+  IconMoodSick,
+  IconSparkles,
+  IconTemperatureSnow,
+  IconTemperatureSun,
+  IconZzz,
+  type TablerIcon,
+} from '@tabler/icons-react';
 
-const ICON_MAP: Record<string, LucideIcon> = {
+const LUCIDE_ICONS: Record<string, LucideIcon> = {
+  Croissant,
+  Sandwich,
+  CookingPot,
+  CakeSlice,
+  Wine,
+  Tv,
+  Clapperboard,
+  Dumbbell,
+  Bath,
   Camera,
   Folder,
   FolderOpen,
@@ -122,6 +151,17 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Edit3,
 };
 
+const TABLER_ICONS: Record<string, TablerIcon> = {
+  TablerArmchair: IconArmchair,
+  TablerBattery1: IconBattery1,
+  TablerBowl: IconBowl,
+  TablerMoodSick: IconMoodSick,
+  TablerSparkles: IconSparkles,
+  TablerTemperatureSnow: IconTemperatureSnow,
+  TablerTemperatureSun: IconTemperatureSun,
+  TablerZzz: IconZzz,
+};
+
 interface MinimalIconProps {
   name: string;
   size?: number;
@@ -137,6 +177,10 @@ export const MinimalIcon: React.FC<MinimalIconProps> = ({
   className = '',
   color,
 }) => {
-  const IconComp = ICON_MAP[name] || Circle;
-  return <IconComp size={size} strokeWidth={strokeWidth} className={className} color={color} />;
+  const TablerComp = TABLER_ICONS[name];
+  if (TablerComp) {
+    return <TablerComp size={size} stroke={strokeWidth} className={className} color={color} />;
+  }
+  const LucideComp = LUCIDE_ICONS[name] || Circle;
+  return <LucideComp size={size} strokeWidth={strokeWidth} className={className} color={color} />;
 };
