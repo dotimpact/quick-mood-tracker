@@ -1,4 +1,4 @@
-import { MoodLevel, MoodPreset, IconPreset, RoutineItem } from '../types';
+import { MoodLevel, MoodPreset, IconPreset, PresetCategory, RoutineItem } from '../types';
 
 /**
  * Calm, muted, cohesive Nordic/earthy palette inspired by Moodistory.
@@ -63,29 +63,46 @@ export const WEATHER_PRESETS: IconPreset[] = [
 ];
 
 export const SENSATION_PRESETS: IconPreset[] = [
-  { id: 'hot', icon: 'Flame', hint: '暑い' },
-  { id: 'cold', icon: 'Snowflake', hint: '寒い' },
-  { id: 'hungry', icon: 'Utensils', hint: '空腹' },
-  { id: 'tired', icon: 'BatteryLow', hint: '疲れた' },
-  { id: 'sleepy', icon: 'Moon', hint: '眠い' },
-  { id: 'fresh', icon: 'Zap', hint: 'スッキリ' },
-  { id: 'unwell', icon: 'Activity', hint: '不調' },
-  { id: 'relaxed', icon: 'Coffee', hint: '一息' },
+  { id: 'hot', icon: 'TablerTemperatureSun', hint: '暑い' },
+  { id: 'cold', icon: 'TablerTemperatureSnow', hint: '寒い' },
+  { id: 'hungry', icon: 'TablerBowl', hint: '空腹' },
+  { id: 'tired', icon: 'TablerBattery1', hint: '疲れた' },
+  { id: 'sleepy', icon: 'TablerZzz', hint: '眠い' },
+  { id: 'fresh', icon: 'TablerSparkles', hint: 'スッキリ' },
+  { id: 'unwell', icon: 'TablerMoodSick', hint: '体調不良' },
+  { id: 'relaxed', icon: 'TablerArmchair', hint: '一息' },
 ];
 
 export const ACTIVITY_PRESETS: IconPreset[] = [
+  { id: 'breakfast', icon: 'Croissant', hint: '朝食' },
+  { id: 'lunch', icon: 'Sandwich', hint: '昼食' },
+  { id: 'dinner', icon: 'CookingPot', hint: '夕食' },
+  { id: 'snack', icon: 'CakeSlice', hint: '間食' },
+  { id: 'coffee', icon: 'Coffee', hint: 'コーヒー' },
+  { id: 'alcohol', icon: 'Wine', hint: 'お酒' },
   { id: 'work', icon: 'Briefcase', hint: '仕事' },
   { id: 'study', icon: 'BookOpen', hint: '読書・勉強' },
-  { id: 'home', icon: 'Home', hint: '家・家事' },
-  { id: 'meal', icon: 'Soup', hint: '食事' },
-  { id: 'game', icon: 'Gamepad2', hint: '趣味' },
-  { id: 'exercise', icon: 'Footprints', hint: '散歩・運動' },
-  { id: 'transit', icon: 'TrainFront', hint: '移動' },
-  { id: 'social', icon: 'Users', hint: '人と一緒' },
-  { id: 'rest', icon: 'Bed', hint: '休息' },
-  { id: 'music', icon: 'Headphones', hint: '音楽' },
+  { id: 'home', icon: 'Home', hint: '家事' },
   { id: 'shop', icon: 'ShoppingBag', hint: '買い物' },
-  { id: 'bath', icon: 'Droplets', hint: '入浴' },
+  { id: 'tv', icon: 'Tv', hint: 'TV' },
+  { id: 'movie', icon: 'Clapperboard', hint: '映画' },
+  { id: 'game', icon: 'Gamepad2', hint: 'ゲーム' },
+  { id: 'music', icon: 'Headphones', hint: '音楽' },
+  { id: 'social', icon: 'Users', hint: '人と一緒' },
+  { id: 'exercise', icon: 'Dumbbell', hint: '運動' },
+  { id: 'walk', icon: 'Footprints', hint: '散歩' },
+  { id: 'transit', icon: 'TrainFront', hint: '移動' },
+  { id: 'rest', icon: 'Bed', hint: '休息' },
+  { id: 'bath', icon: 'Bath', hint: '入浴' },
+  { id: 'meal', icon: 'Soup', hint: '食事', hidden: true },
+];
+
+const pickable = (presets: IconPreset[]) => presets.filter((preset) => !preset.hidden);
+
+export const PRESET_CATEGORIES: PresetCategory[] = [
+  { key: 'sensations', label: '体感', presets: pickable(SENSATION_PRESETS), multiple: true },
+  { key: 'weather', label: '天候', presets: pickable(WEATHER_PRESETS), multiple: false },
+  { key: 'activities', label: '活動', presets: pickable(ACTIVITY_PRESETS), multiple: true },
 ];
 
 export const ROUTINE_ICON_OPTIONS: Array<{ icon: string; label: string }> = [
