@@ -14,6 +14,16 @@ export interface IconPreset {
   id: string;
   icon: string;
   hint: string;        // Tooltip/aria-label only
+  hidden?: boolean;    // Still resolvable for old logs, but not offered in the picker
+}
+
+export type PresetCategoryKey = 'sensations' | 'weather' | 'activities';
+
+export interface PresetCategory {
+  key: PresetCategoryKey;
+  label: string;
+  presets: IconPreset[];
+  multiple: boolean;
 }
 
 export interface MoodLog {

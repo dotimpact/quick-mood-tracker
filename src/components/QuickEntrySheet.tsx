@@ -1,14 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { IconPreset, MoodLevel, MoodLog } from '../types';
-import {
-  ACTIVITY_PRESETS,
-  MOOD_ORDER,
-  MOOD_PRESETS,
-  SENSATION_PRESETS,
-  WEATHER_PRESETS,
-} from '../constants/presets';
+import { IconPreset, MoodLevel, MoodLog, PresetCategory, PresetCategoryKey } from '../types';
+import { MOOD_ORDER, MOOD_PRESETS, PRESET_CATEGORIES } from '../constants/presets';
 import { compressImageFile } from '../services/imageUtils';
 import { haptic } from '../services/haptics';
+import { PresetRef, rankFrequentPresets } from '../services/frequentPresets';
 import { MinimalIcon } from './MinimalIcon';
 
 export interface QuickEntrySheetProps {
@@ -16,22 +11,36 @@ export interface QuickEntrySheetProps {
   initialMood?: MoodLevel;
   initialImageDataUrl?: string;
   editingLog?: MoodLog | null;
+  logs: MoodLog[];
   onClose: () => void;
   onSave: (entry: Omit<MoodLog, 'id' | 'timestamp'> & { id?: string; timestamp?: number }) => void;
   onDelete?: (id: string) => void;
 }
 
-type SectionKey = 'sensations' | 'weather' | 'activities' | 'note';
+type Selection = Record<PresetCategoryKey, string[]>;
 
-const INITIAL_OPEN_SECTIONS: Record<SectionKey, boolean> = {
-  weather: false,
-  sensations: false,
-  activities: false,
-  note: false,
-};
+const EMPTY_SELECTION: Selection = { sensations: [], weather: [], activities: [] };
+const DEFAULT_TAB: PresetCategoryKey = 'activities';
+const GRID_COLUMNS = 5;
+const TILE_HEIGHT = 54;
+const TILE_GAP = 6;
+const GRID_ROWS = Math.max(
+  ...PRESET_CATEGORIES.map((category) => Math.ceil(category.presets.length / GRID_COLUMNS)),
+);
+const GRID_HEIGHT = GRID_ROWS * TILE_HEIGHT + (GRID_ROWS - 1) * TILE_GAP;
 
-function toggleArrayItem(items: string[], id: string): string[] {
-  return items.includes(id) ? items.filter((item) => item !== id) : [...items, id];
+function selectionFromLog(log: MoodLog): Selection {
+  return {
+    sensations: log.sensations,
+    weather: log.weather ? [log.weather] : [],
+    activities: log.activities,
+  };
+}
+
+function resolvePreset(ref: PresetRef): { category: PresetCategory; preset: IconPreset } | undefined {
+  const category = PRESET_CATEGORIES.find((item) => item.key === ref.category);
+  const preset = category?.presets.find((item) => item.id === ref.id);
+  return category && preset ? { category, preset } : undefined;
 }
 
 export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
@@ -39,18 +48,18 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   initialMood,
   initialImageDataUrl,
   editingLog,
+  logs,
   onClose,
   onSave,
   onDelete,
 }) => {
   const [mood, setMood] = useState<MoodLevel>(initialMood ?? 3);
-  const [weather, setWeather] = useState<string | undefined>(undefined);
-  const [sensations, setSensations] = useState<string[]>([]);
-  const [activities, setActivities] = useState<string[]>([]);
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  const [activeTab, setActiveTab] = useState<PresetCategoryKey>(DEFAULT_TAB);
+  const [frequent, setFrequent] = useState<PresetRef[]>([]);
   const [note, setNote] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState<string | undefined>(undefined);
   const [isCompressing, setIsCompressing] = useState(false);
-  const [openSections, setOpenSections] = useState<Record<SectionKey, boolean>>(INITIAL_OPEN_SECTIONS);
   const [isMounted, setIsMounted] = useState(isOpen);
   if (isOpen && !isMounted) setIsMounted(true);
   const isClosing = isMounted && !isOpen;
@@ -60,32 +69,6 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const sectionRefs = useRef<Record<SectionKey, HTMLDivElement | null>>({
-    weather: null,
-    sensations: null,
-    activities: null,
-    note: null,
-  });
-
-  const scrollSectionIntoView = (key: SectionKey) => {
-    window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        const container = scrollContainerRef.current;
-        const sectionEl = sectionRefs.current[key];
-        if (!container || !sectionEl) return;
-        const containerRect = container.getBoundingClientRect();
-        const sectionRect = sectionEl.getBoundingClientRect();
-        const overflowBottom = sectionRect.bottom - containerRect.bottom;
-        if (overflowBottom > 0) {
-          container.scrollBy({
-            top: overflowBottom + 16,
-            behavior: 'smooth',
-          });
-        }
-      }, 20);
-    });
-  };
 
   useEffect(() => {
     if (!isOpen) return;
@@ -99,30 +82,26 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    setOpenSections({ ...INITIAL_OPEN_SECTIONS });
+    setActiveTab(DEFAULT_TAB);
+    setFrequent(rankFrequentPresets(logs, Date.now()));
 
     if (editingLog) {
       setMood(editingLog.mood);
-      setWeather(editingLog.weather);
-      setSensations(editingLog.sensations);
-      setActivities(editingLog.activities);
+      setSelection(selectionFromLog(editingLog));
       setNote(editingLog.note ?? '');
       setImageDataUrl(editingLog.imageDataUrl);
     } else {
       setMood(initialMood ?? 3);
-      setWeather(undefined);
-      setSensations([]);
-      setActivities([]);
+      setSelection(EMPTY_SELECTION);
       setNote('');
       setImageDataUrl(undefined);
     }
+    // logs is left out of the deps on purpose: a log update while open must not reset the selection.
   }, [isOpen, editingLog, initialMood]);
 
   useEffect(() => {
     if (!isOpen || !initialImageDataUrl) return;
     setImageDataUrl(initialImageDataUrl);
-    setOpenSections((prev) => ({ ...prev, note: true }));
-    scrollSectionIntoView('note');
   }, [isOpen, initialImageDataUrl]);
 
   useEffect(() => {
@@ -142,18 +121,23 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   }
 
   const activeMood = MOOD_PRESETS[mood];
-  const selectedWeatherPreset = WEATHER_PRESETS.find((preset) => preset.id === weather);
-  const selectedSensationPresets = SENSATION_PRESETS.filter((preset) => sensations.includes(preset.id));
-  const selectedActivityPresets = ACTIVITY_PRESETS.filter((preset) => activities.includes(preset.id));
-  const trimmedNote = note.trim();
+  const activeCategory = PRESET_CATEGORIES.find((category) => category.key === activeTab) ?? PRESET_CATEGORIES[0];
+  const frequentPresets = frequent.flatMap((ref) => resolvePreset(ref) ?? []);
+  const selectedStyle = {
+    backgroundColor: activeMood.bgSoft,
+    color: activeMood.color,
+    borderColor: activeMood.borderColor,
+  };
 
-  const toggleSection = (key: SectionKey) => {
-    setOpenSections((prev) => {
-      const willOpen = !prev[key];
-      if (willOpen) {
-        scrollSectionIntoView(key);
-      }
-      return { ...prev, [key]: willOpen };
+  const togglePreset = (category: PresetCategory, id: string) => {
+    setSelection((prev) => {
+      const current = prev[category.key];
+      const next = current.includes(id)
+        ? current.filter((item) => item !== id)
+        : category.multiple
+          ? [...current, id]
+          : [id];
+      return { ...prev, [category.key]: next };
     });
   };
 
@@ -187,84 +171,16 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
     onSave({
       ...(editingLog ? { id: editingLog.id, timestamp: editingLog.timestamp } : {}),
       mood,
-      weather,
-      sensations,
-      activities,
-      note: trimmedNote || undefined,
+      weather: selection.weather[0],
+      sensations: selection.sensations,
+      activities: selection.activities,
+      note: note.trim() || undefined,
       imageDataUrl,
     });
   };
 
-  const renderPresetOption = (
-    preset: IconPreset,
-    isSelected: boolean,
-    onToggle: () => void,
-  ) => (
-    <button
-      key={preset.id}
-      type="button"
-      onClick={onToggle}
-      aria-pressed={isSelected}
-      style={
-        isSelected
-          ? {
-              backgroundColor: activeMood.bgSoft,
-              color: activeMood.color,
-              borderColor: activeMood.borderColor,
-            }
-          : undefined
-      }
-      className={`min-h-[64px] py-3 px-1.5 rounded-2xl border flex flex-col items-center justify-center gap-1.5 transition-all duration-150 active:scale-95 focus:outline-none touch-pan-y ${
-        isSelected
-          ? 'font-medium'
-          : 'border-zinc-800/40 bg-zinc-900/30 text-zinc-400 hover:bg-zinc-800/50'
-      }`}
-    >
-      <MinimalIcon name={preset.icon} size={22} strokeWidth={1.85} />
-      <span className="text-xs leading-tight truncate max-w-full">{preset.hint}</span>
-    </button>
-  );
-
-  const renderAccordionSection = (
-    key: SectionKey,
-    label: string,
-    summary: React.ReactNode,
-    content: React.ReactNode,
-  ) => {
-    const isExpanded = openSections[key];
-    return (
-      <div
-        ref={(el) => {
-          sectionRefs.current[key] = el;
-        }}
-        className="border-t border-zinc-800/50"
-      >
-        <button
-          type="button"
-          onClick={() => toggleSection(key)}
-          aria-expanded={isExpanded}
-          className="w-full min-h-[54px] py-3.5 px-2 rounded-xl flex items-center justify-between gap-3 text-left focus:outline-none active:bg-zinc-800/40 transition-colors group touch-pan-y"
-        >
-          <span className="text-sm font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors">
-            {label}
-          </span>
-          <div className="flex items-center gap-2.5 min-w-0">
-            {summary}
-            <span className="w-8 h-8 rounded-lg bg-zinc-900/90 border border-zinc-800/70 flex items-center justify-center shrink-0 text-zinc-400 group-hover:text-zinc-200 transition-colors">
-              <MinimalIcon
-                name={isExpanded ? 'ChevronUp' : 'ChevronDown'}
-                size={20}
-                strokeWidth={1.9}
-              />
-            </span>
-          </div>
-        </button>
-        {isExpanded && content}
-      </div>
-    );
-  };
-
-  const notePreview = trimmedNote.length > 10 ? `${trimmedNote.slice(0, 10)}…` : trimmedNote;
+  const squareButtonClass =
+    'w-11 h-11 shrink-0 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50';
 
   return (
     <div
@@ -279,17 +195,29 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
       aria-modal="true"
     >
       <div
-        className={`w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.5rem)] shadow-2xl flex flex-col overflow-hidden max-h-[85vh] max-h-[85dvh] ${
+        className={`w-full max-w-md mx-auto bg-[#141417] border-t border-zinc-800/60 rounded-t-3xl px-5 pt-3.5 pb-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] shadow-2xl flex flex-col overflow-hidden max-h-[85vh] max-h-[85dvh] ${
           isClosing ? 'sheet-panel-out' : 'sheet-panel-in'
         }`}
         onClick={(event) => event.stopPropagation()}
       >
-        {/* Subtle drag handle */}
-        <div className="flex justify-center mb-4 shrink-0">
+        <div className="relative flex justify-center mb-4 shrink-0">
           <div className="w-10 h-1.5 rounded-full bg-zinc-700/60" />
+          {shownEditingLog && onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                onDelete(shownEditingLog.id);
+                onClose();
+              }}
+              title="削除"
+              aria-label="削除"
+              className="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors active:scale-95"
+            >
+              <MinimalIcon name="Trash2" size={18} strokeWidth={1.85} />
+            </button>
+          )}
         </div>
 
-        {/* 1. Primary Mood Selector (Always Open at Top) */}
         <div className="flex items-start justify-between gap-2 pb-4 shrink-0">
           {MOOD_ORDER.map((level) => {
             const preset = MOOD_PRESETS[level];
@@ -335,225 +263,178 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
           })}
         </div>
 
-        {/* 2. Collapsible Optional Sections */}
         <div
-          ref={scrollContainerRef}
           style={{ WebkitOverflowScrolling: 'touch' }}
-          className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y -mx-2 px-2 pb-2"
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y"
         >
-          {renderAccordionSection(
-            'sensations',
-            '体感',
-            selectedSensationPresets.length > 0 && (
-              <div className="flex items-center gap-2">
-                {selectedSensationPresets.map((preset) => (
-                  <MinimalIcon
-                    key={preset.id}
-                    name={preset.icon}
-                    size={18}
-                    strokeWidth={1.85}
-                    color={activeMood.color}
-                  />
-                ))}
+          {frequentPresets.length > 0 && (
+            <>
+              <div className="text-[11px] text-zinc-500 mx-0.5 mb-2">よく使う</div>
+              <div className="flex flex-wrap gap-1.5 mb-3.5">
+                {frequentPresets.map(({ category, preset }) => {
+                  const isSelected = selection[category.key].includes(preset.id);
+                  return (
+                    <button
+                      key={`${category.key}:${preset.id}`}
+                      type="button"
+                      onClick={() => togglePreset(category, preset.id)}
+                      aria-pressed={isSelected}
+                      style={isSelected ? selectedStyle : undefined}
+                      className={`h-8 pl-2.5 pr-3 rounded-full border inline-flex items-center gap-1.5 text-xs transition-all duration-150 active:scale-95 focus:outline-none ${
+                        isSelected
+                          ? 'font-medium'
+                          : 'border-zinc-800/60 bg-zinc-900/60 text-zinc-400 hover:bg-zinc-800/50'
+                      }`}
+                    >
+                      <MinimalIcon name={preset.icon} size={16} strokeWidth={1.85} />
+                      <span>{preset.hint}</span>
+                    </button>
+                  );
+                })}
               </div>
-            ),
-            <div className="grid grid-cols-4 gap-2.5 pt-1.5 pb-4">
-              {SENSATION_PRESETS.map((preset) =>
-                renderPresetOption(
-                  preset,
-                  sensations.includes(preset.id),
-                  () => setSensations((prev) => toggleArrayItem(prev, preset.id)),
-                ),
-              )}
-            </div>,
+            </>
           )}
 
-          {renderAccordionSection(
-            'weather',
-            '天候',
-            selectedWeatherPreset && (
-              <div className="flex items-center gap-2">
-                <MinimalIcon
-                  name={selectedWeatherPreset.icon}
-                  size={18}
-                  strokeWidth={1.85}
-                  color={activeMood.color}
-                />
-                <span className="text-xs font-medium" style={{ color: activeMood.color }}>
-                  {selectedWeatherPreset.hint}
-                </span>
-              </div>
-            ),
-            <div className="grid grid-cols-4 gap-2.5 pt-1.5 pb-4">
-              {WEATHER_PRESETS.map((preset) =>
-                renderPresetOption(
-                  preset,
-                  weather === preset.id,
-                  () => setWeather((prev) => (prev === preset.id ? undefined : preset.id)),
-                ),
-              )}
-            </div>,
-          )}
-
-          {renderAccordionSection(
-            'activities',
-            'していること',
-            selectedActivityPresets.length > 0 && (
-              <div className="flex items-center gap-2">
-                {selectedActivityPresets.map((preset) => (
-                  <MinimalIcon
-                    key={preset.id}
-                    name={preset.icon}
-                    size={18}
-                    strokeWidth={1.85}
-                    color={activeMood.color}
-                  />
-                ))}
-              </div>
-            ),
-            <div className="grid grid-cols-4 gap-2.5 pt-1.5 pb-4">
-              {ACTIVITY_PRESETS.map((preset) =>
-                renderPresetOption(
-                  preset,
-                  activities.includes(preset.id),
-                  () => setActivities((prev) => toggleArrayItem(prev, preset.id)),
-                ),
-              )}
-            </div>,
-          )}
-
-          {renderAccordionSection(
-            'note',
-            'メモ・画像',
-            (trimmedNote || imageDataUrl) && (
-              <div className="flex items-center gap-2 min-w-0">
-                {imageDataUrl && (
-                  <MinimalIcon
-                    name="ImagePlus"
-                    size={18}
-                    strokeWidth={1.85}
-                    color={activeMood.color}
-                  />
-                )}
-                {trimmedNote && (
-                  <>
-                    <MinimalIcon
-                      name="Edit3"
-                      size={18}
-                      strokeWidth={1.85}
-                      color={activeMood.color}
-                    />
-                    <span className="text-xs text-zinc-400 truncate max-w-[120px]">
-                      {notePreview}
+          <div role="tablist" className="flex gap-1 p-[3px] mb-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800/60">
+            {PRESET_CATEGORIES.map((category) => {
+              const isActive = category.key === activeTab;
+              const count = category.presets.filter((preset) => selection[category.key].includes(preset.id)).length;
+              return (
+                <button
+                  key={category.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveTab(category.key)}
+                  className={`flex-1 h-[30px] rounded-[9px] text-xs flex items-center justify-center gap-1.5 transition-colors focus:outline-none ${
+                    isActive ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  <span>{category.label}</span>
+                  {count > 0 && (
+                    <span
+                      style={{ backgroundColor: activeMood.color }}
+                      className="min-w-4 h-4 px-1 rounded-full text-[10px] font-semibold leading-none text-[#141417] inline-flex items-center justify-center"
+                    >
+                      {count}
                     </span>
-                  </>
-                )}
-              </div>
-            ),
-            <div className="pt-1.5 pb-4 flex items-center gap-3">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleImageChange}
-                className="hidden"
-              />
-              <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleImageChange}
-                className="hidden"
-              />
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-              {imageDataUrl ? (
-                <div className="relative shrink-0 w-12 h-12">
-                  <img
-                    src={imageDataUrl}
-                    alt=""
-                    className="w-12 h-12 rounded-xl object-cover border border-zinc-800/80"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setImageDataUrl(undefined)}
-                    title="写真を削除"
-                    aria-label="写真を削除"
-                    className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white active:scale-95 flex items-center justify-center shadow-md"
-                  >
-                    <MinimalIcon name="X" size={14} strokeWidth={2.25} />
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleCameraClick}
-                    disabled={isCompressing}
-                    title="カメラで撮影"
-                    aria-label="カメラで撮影"
-                    className="w-12 h-12 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50"
-                  >
-                    <MinimalIcon name="Camera" size={22} strokeWidth={1.85} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isCompressing}
-                    title="ギャラリーから選択"
-                    aria-label="ギャラリーから選択"
-                    className="w-12 h-12 rounded-xl bg-zinc-900/60 border border-zinc-800/60 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors active:scale-95 disabled:opacity-50"
-                  >
-                    <MinimalIcon name="ImagePlus" size={22} strokeWidth={1.85} />
-                  </button>
-                </div>
-              )}
-
-              <input
-                type="text"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-                placeholder="ひとことメモ（任意）"
-                aria-label="メモ"
-                className="flex-1 min-w-0 h-12 bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-4 text-base text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
-              />
-            </div>,
-          )}
+          <div
+            role="tabpanel"
+            style={{ height: GRID_HEIGHT, gap: TILE_GAP, gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))` }}
+            className="grid content-start"
+          >
+            {activeCategory.presets.map((preset) => {
+              const isSelected = selection[activeCategory.key].includes(preset.id);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => togglePreset(activeCategory, preset.id)}
+                  aria-pressed={isSelected}
+                  style={isSelected ? { ...selectedStyle, height: TILE_HEIGHT } : { height: TILE_HEIGHT }}
+                  className={`px-0.5 rounded-[14px] border flex flex-col items-center justify-center gap-1 transition-all duration-150 active:scale-95 focus:outline-none touch-pan-y ${
+                    isSelected
+                      ? 'font-medium'
+                      : 'border-zinc-800/40 bg-zinc-900/30 text-zinc-400 hover:bg-zinc-800/50'
+                  }`}
+                >
+                  <MinimalIcon name={preset.icon} size={20} strokeWidth={1.85} />
+                  <span className="text-[11px] leading-tight truncate max-w-full">{preset.hint}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* 3. Always-Visible Bottom Action Bar */}
-        <div className="border-t border-zinc-800/60 pt-3.5 mt-1 flex items-center justify-between gap-3 shrink-0">
-          {shownEditingLog && onDelete && (
-            <button
-              type="button"
-              onClick={() => {
-                onDelete(shownEditingLog.id);
-                onClose();
-              }}
-              className="shrink-0 h-12 px-4 rounded-xl flex items-center gap-2 text-sm text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors active:scale-95"
-            >
-              <MinimalIcon name="Trash2" size={18} strokeWidth={1.85} />
-              <span>削除</span>
-            </button>
+        <div className="border-t border-zinc-800/60 pt-3 mt-3 flex items-center gap-2 shrink-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageChange}
+            className="hidden"
+          />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleImageChange}
+            className="hidden"
+          />
+
+          {imageDataUrl ? (
+            <div className="relative shrink-0 w-11 h-11">
+              <img
+                src={imageDataUrl}
+                alt=""
+                className="w-11 h-11 rounded-xl object-cover border border-zinc-800/80"
+              />
+              <button
+                type="button"
+                onClick={() => setImageDataUrl(undefined)}
+                title="写真を削除"
+                aria-label="写真を削除"
+                className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white active:scale-95 flex items-center justify-center shadow-md"
+              >
+                <MinimalIcon name="X" size={12} strokeWidth={2.25} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleCameraClick}
+                disabled={isCompressing}
+                title="カメラで撮影"
+                aria-label="カメラで撮影"
+                className={squareButtonClass}
+              >
+                <MinimalIcon name="Camera" size={20} strokeWidth={1.85} />
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isCompressing}
+                title="ギャラリーから選択"
+                aria-label="ギャラリーから選択"
+                className={squareButtonClass}
+              >
+                <MinimalIcon name="ImagePlus" size={20} strokeWidth={1.85} />
+              </button>
+            </>
           )}
+
+          <input
+            type="text"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                handleSubmit();
+              }
+            }}
+            placeholder="ひとことメモ"
+            aria-label="メモ"
+            className="flex-1 min-w-0 h-11 bg-zinc-900/60 border border-zinc-800/60 rounded-xl px-3 text-base text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
+          />
 
           <button
             type="button"
             onClick={handleSubmit}
-            style={{
-              backgroundColor: activeMood.color,
-              color: '#141417',
-            }}
-            className="flex-1 h-12 rounded-xl font-semibold text-base flex items-center justify-center gap-2 transition-transform active:scale-[0.98]"
+            title="記録する"
+            aria-label="記録する"
+            style={{ backgroundColor: activeMood.color }}
+            className="w-[52px] h-11 shrink-0 rounded-xl flex items-center justify-center transition-transform active:scale-95"
           >
-            <MinimalIcon name="Check" size={20} strokeWidth={2.25} color="#141417" />
-            <span>記録する</span>
+            <MinimalIcon name="Check" size={22} strokeWidth={2.4} color="#141417" />
           </button>
         </div>
       </div>

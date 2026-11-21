@@ -396,7 +396,7 @@ export async function seedInitialLogsIfEmpty(): Promise<MoodLog[]> {
       mood: 4,
       weather: 'partly',
       sensations: ['relaxed'],
-      activities: ['transit', 'meal'],
+      activities: ['transit', 'coffee'],
       note: 'カフェで一息',
       imageDataUrl: createSampleCafeSunsetSvg(),
     },
