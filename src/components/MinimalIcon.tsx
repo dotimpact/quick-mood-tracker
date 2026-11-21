@@ -59,6 +59,8 @@ import {
   Clapperboard,
   Dumbbell,
   Bath,
+  History,
+  CalendarDays,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -83,6 +85,8 @@ const LUCIDE_ICONS: Record<string, LucideIcon> = {
   Clapperboard,
   Dumbbell,
   Bath,
+  History,
+  CalendarDays,
   Camera,
   Folder,
   FolderOpen,
