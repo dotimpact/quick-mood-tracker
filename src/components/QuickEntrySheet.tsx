@@ -85,7 +85,6 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   const [frequent, setFrequent] = useState<PresetRef[]>([]);
   const [customTime, setCustomTime] = useState<number | null>(null);
   const [isTimePanelOpen, setIsTimePanelOpen] = useState(false);
-  const [middleHeight, setMiddleHeight] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now);
   const [note, setNote] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState<string | undefined>(undefined);
@@ -99,7 +98,6 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const middleRef = useRef<HTMLDivElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
   const timeInputRef = useRef<HTMLInputElement>(null);
 
@@ -120,7 +118,6 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
     setCustomTime(startTime);
     setFrequent(rankFrequentPresets(logs, startTime ?? Date.now()));
     setIsTimePanelOpen(false);
-    setMiddleHeight(null);
 
     if (editingLog) {
       setMood(editingLog.mood);
@@ -186,8 +183,6 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
   };
 
   const toggleTimePanel = () => {
-    // Pinning the middle region keeps the sheet height fixed while the panel swaps in and re-ranking reflows the pills.
-    if (middleHeight === null && middleRef.current) setMiddleHeight(middleRef.current.getBoundingClientRect().height);
     setIsTimePanelOpen((open) => !open);
   };
 
@@ -355,13 +350,9 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
           })}
         </div>
 
-        <div
-          ref={middleRef}
-          style={middleHeight === null ? undefined : { flex: `0 1 ${middleHeight}px` }}
-          className="flex-1 min-h-0 flex flex-col"
-        >
-          {isTimePanelOpen ? (
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-3.5">
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          {isTimePanelOpen && (
+            <div className="absolute inset-0 z-10 bg-[#141417] overflow-y-auto overscroll-contain flex flex-col gap-3.5">
               <div>
                 <div className="text-[11px] text-zinc-500 mx-0.5 mb-2">日付</div>
                 <div className="flex flex-wrap gap-1.5">
@@ -470,10 +461,10 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                 完了
               </button>
             </div>
-          ) : (
+          )}
           <div
             style={{ WebkitOverflowScrolling: 'touch' }}
-            className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y"
+            className={`flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y ${isTimePanelOpen ? 'invisible' : ''}`}
           >
             {frequentPresets.length > 0 && (
               <>
@@ -481,7 +472,7 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
                   <span>よく使う</span>
                   {customTimeLabel && <span>{customTimeLabel} 付近</span>}
                 </div>
-                <div className="flex flex-wrap gap-1.5 mb-3.5">
+                <div className="flex flex-wrap content-start gap-1.5 mb-3.5 min-h-[70px]">
                   {frequentPresets.map(({ category, preset }) => {
                     const isSelected = selection[category.key].includes(preset.id);
                     return (
@@ -562,7 +553,6 @@ export const QuickEntrySheet: React.FC<QuickEntrySheetProps> = ({
               })}
             </div>
           </div>
-          )}
         </div>
 
         <div className="border-t border-zinc-800/60 pt-3 mt-3 flex items-center gap-2 shrink-0">
