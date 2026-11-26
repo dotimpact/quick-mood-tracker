@@ -13,8 +13,20 @@ KOTLIN_HOME="/Applications/Android Studio.app/Contents/plugins/Kotlin/kotlinc"
 export JAVA_HOME
 export PATH="$JAVA_HOME/bin:$PATH"
 
-echo "0. Building web bundle and syncing to Android assets..."
 cd "$PROJECT_DIR"
+echo "0. Checking that HEAD includes origin/main..."
+git fetch -q origin main || echo "warning: fetch に失敗したため、手元の origin/main で確認します" >&2
+if ! git merge-base --is-ancestor origin/main HEAD; then
+  echo "ERROR: $(git rev-parse --abbrev-ref HEAD) は origin/main を含んでいません。端末の新しい版を古い版で上書きするおそれがあります。" >&2
+  echo "main を取り込んでから実行してください。意図的に古い版を入れるときは ALLOW_STALE=1 ./build-apk.sh" >&2
+  [ "$ALLOW_STALE" = 1 ] || exit 1
+fi
+BUILD_VERSION="$(git rev-parse --short HEAD)"
+[ -z "$(git status --porcelain)" ] || BUILD_VERSION="$BUILD_VERSION-dirty"
+export BUILD_VERSION
+echo "   build version: $BUILD_VERSION"
+
+echo "0. Building web bundle and syncing to Android assets..."
 npm run build
 rm -rf "$MAIN_DIR/assets/www"
 mkdir -p "$MAIN_DIR/assets/www"
@@ -33,6 +45,8 @@ echo "2. Linking resources and assets with aapt2..."
   -A "$MAIN_DIR/assets" \
   -R "$BUILD_DIR/compiled_res/res.zip" \
   --java "$BUILD_DIR/gen" \
+  --version-name "1.0.0+$BUILD_VERSION" \
+  --replace-version \
   -o "$BUILD_DIR/unaligned.apk" \
   --auto-add-overlay
 
