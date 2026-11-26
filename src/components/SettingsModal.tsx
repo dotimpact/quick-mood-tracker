@@ -7,6 +7,8 @@ import {
 import { NativeSyncStatus } from '../services/dailySync';
 import { MinimalIcon } from './MinimalIcon';
 
+declare const __BUILD_VERSION__: string;
+
 export interface SettingsModalProps {
   isOpen: boolean;
   settings: AppSettings;
@@ -563,6 +565,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span>JSON 書き出し</span>
             </button>
           </div>
+
+          <p className="text-center text-[11px] text-zinc-600">ビルド {__BUILD_VERSION__}</p>
         </div>
       </div>
     </div>
