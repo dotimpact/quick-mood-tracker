@@ -61,6 +61,11 @@ import {
   Bath,
   History,
   CalendarDays,
+  Ticket,
+  Presentation,
+  ChefHat,
+  TentTree,
+  createLucideIcon,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -75,7 +80,25 @@ import {
   type TablerIcon,
 } from '@tabler/icons-react';
 
+// Lucide・Tabler に頭痛・腹痛がないため同じ線の描き方で自作
+const Headache = createLucideIcon('Headache', [
+  ['path', { d: 'M15 21v-3h2a2 2 0 0 0 2-2v-2l2-1-2-3a7 7 0 1 0-12 5v6', key: 'head' }],
+  ['path', { d: 'm7 9 2-2 2 2 2-2', key: 'pain' }],
+]);
+
+const Stomachache = createLucideIcon('Stomachache', [
+  ['circle', { cx: '9', cy: '4.5', r: '2.5', key: 'head' }],
+  ['path', { d: 'M6 21v-8a4 4 0 0 1 4-4h1a5 5 0 0 1 5 5v2a5 5 0 0 1-5 5', key: 'body' }],
+  ['path', { d: 'm9 15 1.5-1.5L12 15l1.5-1.5', key: 'pain' }],
+]);
+
 const LUCIDE_ICONS: Record<string, LucideIcon> = {
+  Headache,
+  Stomachache,
+  Ticket,
+  Presentation,
+  ChefHat,
+  TentTree,
   Croissant,
   Sandwich,
   CookingPot,
